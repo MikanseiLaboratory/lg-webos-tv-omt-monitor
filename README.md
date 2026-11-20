@@ -5,8 +5,8 @@ LG webOS テレビを **OMT (Open Media Transport)** のモニターにする、
 [OMT](https://github.com/openmediatransport) の受信ストリーム（VMX1 / TCP / DNS-SD）をテレビ上で直接デコードし、
 フルスクリーン表示 + 音声再生 + 遅延・ドロップなどのモニタリング OSD を提供する。
 
-> **Status: 計画段階（実装未着手）**
-> 設計・マイルストーン・リスクは [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) を参照。
+> **Status: 実機動作中** — LG OLED48A2PJA (webOS 10.3.2) で 720p60 = 57〜59fps / 1080p = 30fps。
+> 詳細は [docs/STATUS.md](docs/STATUS.md)、設計は [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)。
 
 ---
 

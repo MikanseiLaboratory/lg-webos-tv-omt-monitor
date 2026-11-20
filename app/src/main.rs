@@ -168,6 +168,11 @@ fn cpu_seconds() -> f64 {
 fn main() {
     let args = Args::parse();
     info!("omt-monitor starting");
+    let nthreads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    vmx::use_shared_thread_pool(Some(nthreads));
+    info!("vmx thread pool: {nthreads} threads");
     let caps = vmx::SimdCapabilities::detect();
     info!("vmx caps: neon={} ssse3={} avx2={}", caps.neon, caps.ssse3, caps.avx2);
 
