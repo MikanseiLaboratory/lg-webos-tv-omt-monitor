@@ -1,0 +1,16 @@
+# Rust / Cargo
+/app/target/
+/target/
+**/*.rs.bk
+
+# Build outputs
+/build/
+*.ipk
+
+# Runtime / local logs
+*.log
+run.log
+.DS_Store
+
+# Local tooling artefacts
+.clientkey-*.json

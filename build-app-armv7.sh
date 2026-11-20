@@ -15,7 +15,7 @@ echo "== compiling C presenter (armv7)"
 clang --target=armv7-linux-gnueabi --sysroot="$SYS" -O2 -fPIC \
   -c "$APP/csrc/presenter_egl.c" -o "$HERE/build/presenter_egl_arm.o"
 clang --target=armv7-linux-gnueabi --sysroot="$SYS" -O2 -fPIC \
-  -c "$HERE/build/getauxval_stub.c" -o "$HERE/build/getauxval_stub.o"
+  -c "$HERE/tools/getauxval_stub.c" -o "$HERE/build/getauxval_stub.o"
 clang --target=armv7-linux-gnueabi --sysroot="$SYS" -O2 -fPIC \
   $(pkg-config --cflags glib-2.0 2>/dev/null || echo "-I$SYS/usr/include/glib-2.0 -I$SYS/usr/lib/glib-2.0/include") \
   -c "$APP/csrc/wakelock.c" -o "$HERE/build/wakelock.o"
@@ -28,7 +28,7 @@ clang --target=armv7-linux-gnueabi --sysroot="$SYS" -O2 -fPIC \
   -c "$APP/csrc/audio_sdl.c" -o "$HERE/build/audio_sdl.o"
 
 echo "== building Rust app (armv7)"
-export RUSTC_WRAPPER="$HERE/build/rustc-vmx-neon.py"
+export RUSTC_WRAPPER="$HERE/tools/rustc-vmx-neon.py"
 touch "$APP/src/main.rs"
 # RUSTC_WRAPPER changes do not invalidate cargo fingerprints; force vmx rebuild.
 rm -rf "$APP"/target/armv7-unknown-linux-gnueabi/release/.fingerprint/vmx-*

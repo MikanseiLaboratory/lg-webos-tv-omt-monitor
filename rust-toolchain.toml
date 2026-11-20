@@ -1,0 +1,4 @@
+# The build needs nightly: openmediatransport/vmx require rustc 1.97, and the
+# armv7 NEON kernels need the unstable AArch32 intrinsics.
+[toolchain]
+channel = "nightly"

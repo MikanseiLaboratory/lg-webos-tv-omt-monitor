@@ -17,6 +17,12 @@ Details: [docs/STATUS.md](docs/STATUS.md).
 - Keeps the TV awake while streaming (`tvpowerd` screen-on request, re-sent every 30 s).
 - Finds OMT sources by DNS-SD and shows a source list on the TV.
 
+## Network requirement
+
+Use a **wired LAN connection** between the sender and the TV. OMT over Wi-Fi is
+usable but jittery: expect occasional audio dropouts and dropped video frames on
+a congested or weak link. Wired Ethernet removes most of that jitter.
+
 ## Target device (measured)
 
 | Item | Value |
