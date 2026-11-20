@@ -75,6 +75,7 @@ unsafe extern "C" {
     fn audio_close();
     fn audio_level_frames() -> i32;
     fn sdl_presenter_size(w: *mut i32, h: *mut i32);
+    fn sdl_presenter_timings(upload_ms: *mut f64, present_ms: *mut f64);
     fn sdl_presenter_shutdown();
     fn input_probe() -> i32;
 }
@@ -618,10 +619,20 @@ fn main() {
                 let dn = dec_frames.max(1) as f64;
                 let cpu = (cpu_seconds() - cpu_start) / secs * 100.0;
                 info!(
-                    "fps={:.1} decode={:.2}ms present={:.2}ms cpu={:.0}% frames={} aframes={} adrop={} abuf={}ms",
+                    "fps={:.1} decode={:.2}ms present={:.2}ms (up={:.2} draw={:.2}) cpu={:.0}% frames={} aframes={} adrop={} abuf={}ms",
                     frames as f64 / secs,
                     dec_us as f64 / dn / 1000.0,
                     pres_us as f64 / n / 1000.0,
+                    {
+                        let (mut u, mut p2) = (0f64, 0f64);
+                        unsafe { sdl_presenter_timings(&mut u, &mut p2) };
+                        u
+                    },
+                    {
+                        let (mut u, mut p2) = (0f64, 0f64);
+                        unsafe { sdl_presenter_timings(&mut u, &mut p2) };
+                        p2
+                    },
                     cpu,
                     frames,
                     pres.audio_frames.load(Ordering::Relaxed),

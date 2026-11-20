@@ -68,6 +68,15 @@ void sdl_presenter_size(int *w, int *h)
   }
 }
 
+/* Rolling averages of the two upload steps (milliseconds). */
+static double g_upload_ms = 0.0, g_present_ms = 0.0;
+
+void sdl_presenter_timings(double *upload_ms, double *present_ms)
+{
+  *upload_ms = g_upload_ms;
+  *present_ms = g_present_ms;
+}
+
 int sdl_presenter_frame(const void *bgra, int w, int h)
 {
   if (!g_ren)
@@ -87,12 +96,18 @@ int sdl_presenter_frame(const void *bgra, int w, int h)
     SDL_RenderSetLogicalSize(g_ren, w, h);
   }
 
+  Uint32 t0 = SDL_GetTicks();
   if (SDL_UpdateTexture(g_tex, NULL, bgra, w * 4) != 0)
     return -3;
+  Uint32 t1 = SDL_GetTicks();
 
   SDL_RenderClear(g_ren);
   SDL_RenderCopy(g_ren, g_tex, NULL, NULL);
   SDL_RenderPresent(g_ren);
+  Uint32 t2 = SDL_GetTicks();
+
+  g_upload_ms = g_upload_ms * 0.9 + (double)(t1 - t0) * 0.1;
+  g_present_ms = g_present_ms * 0.9 + (double)(t2 - t1) * 0.1;
   return 0;
 }
 
