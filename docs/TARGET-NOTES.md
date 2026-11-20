@@ -76,3 +76,27 @@
   1. `external_test_64` と同じ **EGL/GLES2 + wayland 直叩き**に置き換える（実績あり）
   2. bridge 同梱の **SDL3 (0.4.16)** を使う
   3. SDL2 の webOS ドライバが要求する env（`APPID`, `DISPLAY_ID`, `XDG_RUNTIME_DIR`）を確認
+
+## M0 続き2（2026-11-20）
+
+### SDL2/SDL3 が使えない理由（確定）
+- bridge 同梱の **libxkbcommon 0.9.2** が webOS のキーマップを解釈できない:
+  `Keycode too big: must be < 0xfff, got 0x5030` → `Failed to compile keymap`
+- SDL の wayland ドライバはその直後に NULL 参照で落ちる（SIGSEGV）
+- SDL3 も同じ xkbcommon を使うため、B 案（SDL3）はこの環境では成立しない見込み
+
+### EGL/GLES2 直叩き（A案）は動作
+`csrc/presenter_egl.c` + `build-app.sh` で実装。**root シェルからは動作確認済み**（1080p60 入力）:
+
+```
+fps=42.8 decode=5.89ms present=16.11ms cpu=117%
+fps=38.3 decode=5.92ms present=16.77ms cpu=128%
+fps=42.4 decode=5.68ms present=16.42ms cpu=119%
+```
+
+- `present` ≈ 16.4ms は eglSwapBuffers の vsync 待ち（60Hz）。decode と直列化しているため 42fps で頭打ち。
+- 改善: swap interval 0 にして最新フレーム優先でドロップする / decode と present を別スレッド化。
+
+### 残る課題
+- **SAM から起動した場合のみ** `wl_display_connect` 直前でプロセスが消える（root シェルからは同じバイナリが動作）。
+  jail/seccomp かコンポジタ側の制約と思われる。要調査（次は bridge アプリと同じ起動条件を突き合わせる）。

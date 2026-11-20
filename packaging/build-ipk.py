@@ -68,6 +68,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--bin", required=True)
     ap.add_argument("--out", default=os.path.join(HERE, f"{APP_ID}.ipk"))
+    ap.add_argument("--lib-so", default=None, help="extra shared library to bundle as lib/<name>")
     args = ap.parse_args()
 
     binary = open(args.bin, "rb").read()
@@ -80,6 +81,12 @@ def main():
         (f"{base}/icon.png", icon, 0o644),
         (f"{base}/omt-monitor", binary, 0o755),
     ]
+    if args.lib_so:
+        lib_name = os.path.basename(args.lib_so)
+        # SONAME form so the loader finds it under $ORIGIN/lib
+        so_name = lib_name.split(".so.")
+        so_name = so_name[0] + ".so." + so_name[1].split(".")[0] if len(so_name) > 1 else lib_name
+        data_entries.append((f"{base}/lib/{so_name}", open(args.lib_so, "rb").read(), 0o755))
 
     control = f"""Package: {APP_ID}
 Version: {VERSION}

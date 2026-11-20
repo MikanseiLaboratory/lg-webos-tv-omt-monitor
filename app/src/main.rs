@@ -1,7 +1,7 @@
 //! OMT (Open Media Transport) monitor for LG webOS TVs.
 //!
-//! Receives an OMT video stream, decodes VMX1 in software and presents BGRA
-//! frames through SDL2 (which, on webOS, goes through the 64-to-32 bridge).
+//! Receives an OMT video stream, decodes VMX1 in software and presents the BGRA
+//! frames either through the bridge's EGL/GLES2 path (default) or SDL2.
 
 mod sdl;
 
@@ -17,7 +17,7 @@ static LOG_PATH: OnceLock<String> = OnceLock::new();
 
 fn log_path() -> &'static str {
     LOG_PATH.get_or_init(|| {
-        // Apps run in a jail with a private /tmp, so log next to the executable.
+        // Apps run in a jail; log next to the executable so it can be read back.
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
                 return dir.join("run.log").to_string_lossy().into_owned();
@@ -31,11 +31,7 @@ fn log(msg: &str) {
     let line = format!("[{:?}] {msg}\n", std::time::SystemTime::now());
     print!("{line}");
     let _ = std::io::stdout().flush();
-    if let Ok(mut f) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_path())
-    {
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(log_path()) {
         let _ = f.write_all(line.as_bytes());
     }
 }
@@ -44,12 +40,27 @@ macro_rules! info {
     ($($arg:tt)*) => { crate::log(&format!($($arg)*)) };
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Presenter {
+    Egl,
+    Sdl2,
+}
+
+unsafe extern "C" {
+    fn presenter_init(w: i32, h: i32) -> i32;
+    fn presenter_frame(pixels: *const u8, w: i32, h: i32) -> i32;
+    fn presenter_roundtrip() -> i32;
+    fn presenter_set_log(cb: extern "C" fn(*const core::ffi::c_char));
+    fn presenter_shutdown();
+}
+
 struct Args {
     url: Option<String>,
     list_only: bool,
     windowed: bool,
     width: i32,
     height: i32,
+    presenter: Option<Presenter>,
 }
 
 impl Args {
@@ -60,6 +71,7 @@ impl Args {
             windowed: false,
             width: 1920,
             height: 1080,
+            presenter: None,
         };
         let mut it = env::args().skip(1);
         while let Some(arg) = it.next() {
@@ -69,17 +81,39 @@ impl Args {
                 "--windowed" | "-w" => a.windowed = true,
                 "--width" => a.width = it.next().and_then(|v| v.parse().ok()).unwrap_or(1920),
                 "--height" => a.height = it.next().and_then(|v| v.parse().ok()).unwrap_or(1080),
+                "--presenter" => {
+                    a.presenter = match it.next().as_deref() {
+                        Some("sdl2") => Some(Presenter::Sdl2),
+                        Some("egl") => Some(Presenter::Egl),
+                        _ => None,
+                    }
+                }
                 "--help" | "-h" => {
-                    eprintln!(
-                        "omt-monitor [--connect omt://HOST:PORT/NAME] [--list] [--windowed] [--width N] [--height N]"
-                    );
+                    eprintln!("omt-monitor [--connect URL] [--list] [--presenter egl|sdl2]");
                     std::process::exit(0);
                 }
-                other => info!("ignoring unknown argument: {other}"),
+                _ => {}
             }
         }
         a
     }
+}
+
+fn presenter_from_file() -> Option<Presenter> {
+    let exe = env::current_exe().ok()?;
+    let text = std::fs::read_to_string(exe.parent()?.join("presenter.txt")).ok()?;
+    match text.trim() {
+        "sdl2" => Some(Presenter::Sdl2),
+        "egl" => Some(Presenter::Egl),
+        _ => None,
+    }
+}
+
+fn source_from_file() -> Option<String> {
+    let exe = env::current_exe().ok()?;
+    let text = std::fs::read_to_string(exe.parent()?.join("source.txt")).ok()?;
+    let url = text.trim().to_string();
+    if url.is_empty() { None } else { Some(url) }
 }
 
 fn discover(timeout: Duration) -> Vec<(String, Vec<String>)> {
@@ -91,15 +125,14 @@ fn discover(timeout: Duration) -> Vec<(String, Vec<String>)> {
                 return out;
             }
             for src in d.sources() {
-                let url = src.to_url();
                 info!(
                     "source: {} port={} url={} addrs={:?}",
                     src.instance_name(),
                     src.port,
-                    url,
+                    src.to_url(),
                     src.addresses
                 );
-                out.push((url, src.addresses.clone()));
+                out.push((src.to_url(), src.addresses.clone()));
             }
         }
         Err(e) => info!("discovery unavailable: {e}"),
@@ -117,86 +150,161 @@ fn connect(url: &str, addresses: &[String]) -> Result<ReceiverSession, String> {
         .map_err(|e| format!("connect {url} failed: {e}"))
 }
 
+/// CPU time consumed by this process so far (seconds).
+fn cpu_seconds() -> f64 {
+    let Ok(stat) = std::fs::read_to_string("/proc/self/stat") else {
+        return 0.0;
+    };
+    let Some(rest) = stat.rsplit_once(')').map(|(_, r)| r) else {
+        return 0.0;
+    };
+    let fields: Vec<&str> = rest.split_whitespace().collect();
+    // utime = field 14, stime = field 15 (1-based), i.e. index 11 and 12 here.
+    let utime: f64 = fields.get(11).and_then(|v| v.parse().ok()).unwrap_or(0.0);
+    let stime: f64 = fields.get(12).and_then(|v| v.parse().ok()).unwrap_or(0.0);
+    (utime + stime) / 100.0
+}
+
+struct Stats {
+    window_start: Instant,
+    frames: u64,
+    decode_us: u64,
+    present_us: u64,
+    cpu_start: f64,
+}
+
+impl Stats {
+    fn new() -> Self {
+        Stats {
+            window_start: Instant::now(),
+            frames: 0,
+            decode_us: 0,
+            present_us: 0,
+            cpu_start: cpu_seconds(),
+        }
+    }
+
+    fn report(&mut self, total: u64, session: &ReceiverSession) {
+        let secs = self.window_start.elapsed().as_secs_f64();
+        if secs < 1.0 || self.frames == 0 {
+            return;
+        }
+        let fps = self.frames as f64 / secs;
+        let decode_ms = self.decode_us as f64 / self.frames as f64 / 1000.0;
+        let present_ms = self.present_us as f64 / self.frames as f64 / 1000.0;
+        let cpu = (cpu_seconds() - self.cpu_start) / secs * 100.0;
+        let st = session.statistics();
+        info!(
+            "fps={fps:.1} decode={decode_ms:.2}ms present={present_ms:.2}ms cpu={cpu:.0}% total={total} \
+             bytes={} drop_wire={} drop_decode={}",
+            st.bytes_received, st.frames_dropped_wire, st.frames_dropped_decode
+        );
+        self.frames = 0;
+        self.decode_us = 0;
+        self.present_us = 0;
+        self.window_start = Instant::now();
+        self.cpu_start = cpu_seconds();
+    }
+}
+
 fn main() {
     let args = Args::parse();
-    info!(
-        "omt-monitor starting (windowed={}, {}x{})",
-        args.windowed, args.width, args.height
-    );
+    info!("omt-monitor starting");
 
-    let mut target: Option<(String, Vec<String>)> =
-        args.url.clone().map(|u| (u, Vec::new()));
+    let presenter = args
+        .presenter
+        .or_else(presenter_from_file)
+        .unwrap_or(Presenter::Egl);
+    info!("presenter = {}", match presenter {
+        Presenter::Egl => "egl",
+        Presenter::Sdl2 => "sdl2",
+    });
 
     if args.list_only {
         discover(Duration::from_secs(3));
         return;
     }
 
-    // Packaged installs have no argv, so allow a URL in source.txt next to the binary.
-    if target.is_none() {
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(dir) = exe.parent() {
-                let cfg = dir.join("source.txt");
-                if let Ok(text) = std::fs::read_to_string(&cfg) {
-                    let url = text.trim().to_string();
-                    if !url.is_empty() {
-                        info!("using {} from {}", url, cfg.display());
-                        target = Some((url, Vec::new()));
-                    }
-                }
-            }
-        }
-    }
+    let mut target: Option<(String, Vec<String>)> = args
+        .url
+        .clone()
+        .map(|u| (u, Vec::new()))
+        .or_else(|| source_from_file().map(|u| (u, Vec::new())));
 
     if target.is_none() {
-        info!("no --connect given; discovering OMT sources for 3s");
-        let found = discover(Duration::from_secs(3));
-        target = found.into_iter().next();
+        info!("no source configured; discovering OMT sources for 3s");
+        target = discover(Duration::from_secs(3)).into_iter().next();
     }
 
     let Some((url, addresses)) = target else {
-        info!("no OMT source found; pass --connect omt://HOST:PORT/NAME");
+        info!("no OMT source found");
         std::process::exit(2);
     };
     info!("target: {url}");
 
-    // The bridge's SDL2 defaults to a driver that is not usable on webOS 10;
-    // force the wayland path (the bridge provides libwayland + libEGL stubs).
-    if std::env::var_os("SDL_VIDEODRIVER").is_none() {
-        unsafe { std::env::set_var("SDL_VIDEODRIVER", "wayland") };
-    }
-    info!("SDL video driver = {}", std::env::var("SDL_VIDEODRIVER").unwrap_or_default());
-
-    if let Err(e) = sdl::init() {
-        info!("SDL init failed: {e}");
-        std::process::exit(3);
-    }
-    let window = match sdl::create_window("OMT Monitor", args.width, args.height, !args.windowed) {
-        Ok(w) => w,
-        Err(e) => {
-            info!("window creation failed: {e}");
-            sdl::quit();
-            std::process::exit(3);
+    // Environment the webOS compositor / bridge expect.
+    for (k, v) in [
+        ("XDG_RUNTIME_DIR", "/tmp/xdg"),
+        ("EGL_PLATFORM", "wayland"),
+        ("WAYLAND_DISPLAY", "wayland-0"),
+        ("XKB_CONFIG_ROOT", "/usr/share/X11/xkb"),
+        (
+            "GLES_PROXY_BIN",
+            "/media/developer/apps/usr/palm/applications/org.webosbrew.bridge-64to32/service/gles_proxy",
+        ),
+    ] {
+        if env::var_os(k).is_none() {
+            unsafe { env::set_var(k, v) };
         }
-    };
-    let renderer = match sdl::create_renderer(&window) {
-        Ok(r) => r,
-        Err(e) => {
-            info!("renderer creation failed: {e}");
-            sdl::quit();
-            std::process::exit(3);
+    }
+
+    let (mut sdl_window, mut sdl_renderer, mut sdl_texture) = (None, None, None);
+
+    extern "C" fn c_log(msg: *const core::ffi::c_char) {
+        if !msg.is_null() {
+            let s = unsafe { core::ffi::CStr::from_ptr(msg) }.to_string_lossy();
+            info!("[egl] {s}");
         }
-    };
+    }
 
-    // Clear to black once so the TV does not show garbage while connecting.
-    sdl::delay(50);
+    match presenter {
+        Presenter::Egl => {
+            unsafe { presenter_set_log(c_log) };
+            let rc = unsafe { presenter_init(args.width, args.height) };
+            if rc != 0 {
+                info!("EGL presenter init failed: {rc}");
+                std::process::exit(3);
+            }
+            info!("EGL presenter ready");
+        }
+        Presenter::Sdl2 => {
+            if let Err(e) = sdl::init() {
+                info!("SDL init failed: {e}");
+                std::process::exit(3);
+            }
+            let w = match sdl::create_window("OMT Monitor", args.width, args.height, !args.windowed) {
+                Ok(w) => w,
+                Err(e) => {
+                    info!("SDL window failed: {e}");
+                    std::process::exit(3);
+                }
+            };
+            let r = match sdl::create_renderer(&w) {
+                Ok(r) => r,
+                Err(e) => {
+                    info!("SDL renderer failed: {e}");
+                    std::process::exit(3);
+                }
+            };
+            sdl_window = Some(w);
+            sdl_renderer = Some(r);
+        }
+    }
 
-    let mut texture: Option<sdl::Texture> = None;
+    let mut events = [0u8; sdl::SDL_EVENT_SIZE];
+    let mut total: u64 = 0;
+    let mut stats = Stats::new();
     let mut tex_size = (0i32, 0i32);
-    let mut event_buf = [0u8; sdl::SDL_EVENT_SIZE];
-    let mut frames: u64 = 0;
-    let mut last_report = Instant::now();
-    let mut report_frames: u64 = 0;
     let mut last_frame_at = Instant::now();
     let mut running = true;
 
@@ -208,72 +316,87 @@ fn main() {
             }
             Err(e) => {
                 info!("{e}; retrying in 2s");
-                sdl::delay(2000);
+                std::thread::sleep(Duration::from_secs(2));
                 continue 'outer;
             }
         };
         last_frame_at = Instant::now();
 
         while running {
-            while let Some((ty, sym)) = sdl::poll_event(&mut event_buf) {
-                if ty == sdl::SDL_QUIT
-                    || (ty == sdl::SDL_KEYDOWN
-                        && (sym == sdl::SDLK_ESCAPE || sym == sdl::SDLK_q))
-                {
-                    info!("quit requested");
-                    running = false;
+            if presenter == Presenter::Sdl2 {
+                while let Some((ty, sym)) = sdl::poll_event(&mut events) {
+                    if ty == sdl::SDL_QUIT
+                        || (ty == sdl::SDL_KEYDOWN
+                            && (sym == sdl::SDLK_ESCAPE || sym == sdl::SDLK_q))
+                    {
+                        running = false;
+                    }
+                }
+                if !running {
+                    break;
                 }
             }
-            if !running {
-                break;
-            }
 
-            match session.recv_video_timeout(Duration::from_millis(100)) {
-                Some(frame) => {
-                    let (w, h) = (frame.width as i32, frame.height as i32);
-                    if texture.is_none() || tex_size != (w, h) {
-                        info!("video {}x{}", w, h);
-                        texture = sdl::create_texture(&renderer, w, h).ok();
+            let t0 = Instant::now();
+            let Some(frame) = session.recv_video_timeout(Duration::from_millis(100)) else {
+                if last_frame_at.elapsed() > Duration::from_secs(3) {
+                    info!("no frames for 3s; reconnecting");
+                    break;
+                }
+                continue;
+            };
+            let decode_us = t0.elapsed().as_micros() as u64;
+
+            let (w, h) = (frame.width as i32, frame.height as i32);
+            let t1 = Instant::now();
+            match presenter {
+                Presenter::Egl => {
+                    if tex_size != (w, h) {
+                        info!("video {w}x{h}");
                         tex_size = (w, h);
                     }
-                    if let Some(tex) = texture.as_ref() {
-                        if sdl::update_texture(tex, &frame.pixels, w, h).is_ok() {
-                            sdl::present(&renderer, tex, &window);
-                        }
-                    }
-                    frames += 1;
-                    report_frames += 1;
-                    last_frame_at = Instant::now();
+                    let _ = unsafe { presenter_frame(frame.pixels.as_ptr(), w, h) };
                 }
-                None => {
-                    if last_frame_at.elapsed() > Duration::from_secs(3) {
-                        info!("no frames for 3s; reconnecting");
-                        break;
+                Presenter::Sdl2 => {
+                    if sdl_texture.is_none() || tex_size != (w, h) {
+                        info!("video {w}x{h}");
+                        sdl_texture = sdl::create_texture(sdl_renderer.as_ref().unwrap(), w, h).ok();
+                        tex_size = (w, h);
+                    }
+                    if let (Some(tex), Some(ren), Some(win)) =
+                        (sdl_texture.as_ref(), sdl_renderer.as_ref(), sdl_window.as_ref())
+                    {
+                        if sdl::update_texture(tex, &frame.pixels, w, h).is_ok() {
+                            sdl::present(ren, tex, win);
+                        }
                     }
                 }
             }
+            stats.present_us += t1.elapsed().as_micros() as u64;
+            stats.decode_us += decode_us;
+            stats.frames += 1;
+            total += 1;
+            last_frame_at = Instant::now();
 
-            if last_report.elapsed() >= Duration::from_secs(2) {
-                let stats = session.statistics();
-                info!(
-                    "fps={:.1} total={} bytes={} decoded={} drop_wire={} drop_decode={}",
-                    report_frames as f64 / last_report.elapsed().as_secs_f64(),
-                    frames,
-                    stats.bytes_received,
-                    stats.frames_decoded,
-                    stats.frames_dropped_wire,
-                    stats.frames_dropped_decode
-                );
-                report_frames = 0;
-                last_report = Instant::now();
+            stats.report(total, &session);
+
+            if presenter == Presenter::Egl {
+                let _ = unsafe { presenter_roundtrip() };
             }
         }
         session.disconnect();
     }
 
-    if let Some(tex) = texture.as_ref() {
-        sdl::destroy(&window, &renderer, tex);
+    match presenter {
+        Presenter::Egl => unsafe { presenter_shutdown() },
+        Presenter::Sdl2 => {
+            if let (Some(tex), Some(ren), Some(win)) =
+                (sdl_texture.as_ref(), sdl_renderer.as_ref(), sdl_window.as_ref())
+            {
+                sdl::destroy(win, ren, tex);
+            }
+            sdl::quit();
+        }
     }
-    sdl::quit();
-    info!("bye (frames={frames})");
+    info!("bye (frames={total})");
 }
