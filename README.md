@@ -92,7 +92,8 @@ Logs are written to `run.log` in the app directory.
 
 ## Source selection
 
-Remote-control input is not delivered to this client, so selection is driven by three mechanisms:
+The picker is driven by the remote control (SDL2 presenter). A fixed source can also be selected
+without any input, through three mechanisms:
 
 1. `source.txt` in the app directory pins a fixed URL, for example
    `omt://192.168.3.53:6400/Colorbars`. Playback starts without UI.
@@ -128,9 +129,10 @@ measured ceiling is about 34 fps for 1080p, so the stream is displayed at 30-31 
 Hardware decoding is not an option. OMT carries VMX1 only, and the TV hardware decoders
 (NDL / GStreamer) support H.264, HEVC, VP9 and AV1, not VMX1.
 
-Remote-control input is not available to raw Wayland clients. `wl_keyboard` receives focus but no key
-events, and the networkinput pointer socket connects but yields no events. The `wl_webos_shell` shell
-role is not advertised to this client, so keys are not routed to the surface.
+Remote-control input is delivered only through the SDL2 presenter. A raw Wayland client receives
+keyboard focus but no key events, and the networkinput pointer socket yields nothing, because the
+compositor does not advertise a `wl_webos_shell` role to it. SDL2 is therefore the default presenter;
+writing `egl` to `presenter.txt` switches back to the raw EGL path, which has no input.
 
 ## Requirements
 
@@ -140,7 +142,7 @@ role is not advertised to this client, so keys are not routed to the surface.
 ## Limitations
 
 - No audio. Video only.
-- No remote-control input. The app is switched or stopped from the system UI.
+- Remote-control input works only in the SDL2 presenter.
 - 1080p is capped at about 30-31 fps; 1080p60 is impossible with software VMX1 decoding.
 - The app must be installed as an IPK and launched through `applicationManager` (SAM).
 
