@@ -40,6 +40,18 @@ int sdl_presenter_init(int w, int h)
   return 0;
 }
 
+void sdl_presenter_size(int *w, int *h)
+{
+  int ow = 0, oh = 0;
+  if (g_ren && SDL_GetRendererOutputSize(g_ren, &ow, &oh) == 0 && ow > 0 && oh > 0) {
+    *w = ow;
+    *h = oh;
+  } else {
+    *w = g_w;
+    *h = g_h;
+  }
+}
+
 int sdl_presenter_frame(const void *bgra, int w, int h)
 {
   if (!g_ren)

@@ -69,6 +69,7 @@ unsafe extern "C" {
     fn sdl_presenter_init(w: i32, h: i32) -> i32;
     fn sdl_presenter_frame(pixels: *const u8, w: i32, h: i32) -> i32;
     fn sdl_presenter_poll_key(code: *mut i32) -> i32;
+    fn sdl_presenter_size(w: *mut i32, h: *mut i32);
     fn sdl_presenter_shutdown();
     fn input_probe() -> i32;
 }
@@ -218,46 +219,53 @@ fn cpu_seconds() -> f64 {
     (utime + stime) / 100.0
 }
 
-fn draw_picker(shared: &Shared, font: &Option<font::Font>, canvas: &mut [u8]) {
+fn draw_picker(shared: &Shared, font: &Option<font::Font>, canvas: &mut [u8], ui_w: usize, ui_h: usize) {
     let sources = shared.sources.lock().map(|s| s.clone()).unwrap_or_default();
     let selected = *shared.selected.lock().unwrap_or_else(|e| e.into_inner());
 
-    let mut c = font::Canvas::new(canvas, UI_W, UI_H);
+    let mut c = font::Canvas::new(canvas, ui_w, ui_h);
     c.clear(18, 16, 14);
 
     let Some(f) = font.as_ref() else {
         return;
     };
 
-    c.text(f, 60, 50, 3, "OMT MONITOR", (255, 210, 120));
-    c.text(f, 60, 110, 1, "SELECT A SOURCE ON THE LAN", (170, 170, 170));
+    // Proportional layout so the picker looks right at 1280x720 and 1920x1080.
+    let title_scale = (ui_h / 180).max(1);
+    let title_y = ui_h / 27;
+    let sub_y = title_y + 16 * title_scale + 12;
+    let list_top = (ui_h * 22) / 100;
+    let row_h = (ui_h / 15).max(40);
+
+    c.text(f, 60, title_y, title_scale, "OMT MONITOR", (255, 210, 120));
+    c.text(f, 60, sub_y, (title_scale / 3).max(1), "SELECT A SOURCE ON THE LAN", (170, 170, 170));
 
     if sources.is_empty() {
-        c.text(f, 60, LIST_TOP as usize, 2, "SEARCHING FOR OMT SOURCES...", (200, 200, 200));
+        c.text(f, 60, list_top, (title_scale / 2).max(1), "SEARCHING FOR OMT SOURCES...", (200, 200, 200));
     }
 
     for (i, s) in sources.iter().take(8).enumerate() {
-        let y = LIST_TOP + i * ROW_H;
+        let y = list_top + i * row_h;
         if i == selected {
-            c.fill(40, y - 10, UI_W - 80, ROW_H - 8, 70, 120, 60);
+            c.fill(40, y - 10, ui_w - 80, row_h - 8, 70, 120, 60);
         }
         let label = if i == selected {
             format!("> {}", s.name.to_uppercase())
         } else {
             format!("  {}", s.name.to_uppercase())
         };
-        c.text(f, 60, y, 2, &label, (240, 240, 240));
+        c.text(f, 60, y, (title_scale / 2).max(1), &label, (240, 240, 240));
         let addr = s.addrs.first().cloned().unwrap_or_default();
-        c.text(f, 720, y, 1, &addr, (160, 200, 160));
+        c.text(f, (ui_w * 60) / 100, y, (title_scale / 4).max(1), &addr, (160, 200, 160));
     }
 
-    let hint_y = UI_H - 70;
+    let hint_y = ui_h - (ui_h / 15);
     c.text(
         f,
         60,
         hint_y,
         1,
-        "UP/DOWN: SELECT    ENTER: PLAY    BACK: RETURN TO LIST",
+        "UP/DOWN: SELECT    ENTER: PLAY    ANY KEY: BACK TO LIST",
         (150, 150, 150),
     );
 }
@@ -309,8 +317,8 @@ fn handle_keys(shared: &Shared) -> () {
                 }
                 _ => {}
             }
-        } else if code == KEY_BACK {
-            info!("back to picker");
+        } else if matches!(code, KEY_UP | KEY_DOWN | KEY_ENTER | KEY_BACK) {
+            info!("back to picker (key {code})");
             *shared.play.lock().unwrap() = None;
             shared.mode.store(MODE_PICKER, Ordering::SeqCst);
         }
@@ -446,7 +454,17 @@ fn main() {
 
         let font = font::Font::load();
         info!("font loaded: {}", font.is_some());
-        let mut canvas = vec![0u8; UI_W * UI_H * 4];
+        let (mut ui_w, mut ui_h) = (UI_W, UI_H);
+        if use_sdl {
+            let (mut w32, mut h32) = (0i32, 0i32);
+            unsafe { sdl_presenter_size(&mut w32, &mut h32) };
+            if w32 > 0 && h32 > 0 {
+                ui_w = w32 as usize;
+                ui_h = h32 as usize;
+            }
+        }
+        info!("ui canvas {ui_w}x{ui_h}");
+        let mut canvas = vec![0u8; ui_w * ui_h * 4];
 
         let mut frames: u64 = 0;
         let mut window = Instant::now();
@@ -468,11 +486,11 @@ fn main() {
             if mode == MODE_PICKER {
                 let now = Instant::now();
                 if last_picker.map(|t| t.elapsed() > Duration::from_millis(150)).unwrap_or(true) {
-                    draw_picker(&pres, &font, &mut canvas);
+                    draw_picker(&pres, &font, &mut canvas, ui_w, ui_h);
                     if use_sdl {
-                        let _ = unsafe { sdl_presenter_frame(canvas.as_ptr(), UI_W as i32, UI_H as i32) };
+                        let _ = unsafe { sdl_presenter_frame(canvas.as_ptr(), ui_w as i32, ui_h as i32) };
                     } else {
-                        let _ = unsafe { presenter_frame(canvas.as_ptr(), UI_W as i32, UI_H as i32) };
+                        let _ = unsafe { presenter_frame(canvas.as_ptr(), ui_w as i32, ui_h as i32) };
                     }
                     last_picker = Some(now);
                 }
@@ -577,7 +595,7 @@ fn main() {
                 let n = shared.sources.lock().map(|s| s.len()).unwrap_or(0);
                 if n > 0 {
                     let t = *first_source_at.get_or_insert_with(Instant::now);
-                    let ready = pick_index.is_some() || t.elapsed() > Duration::from_secs(4);
+                    let ready = pick_index.is_some() && t.elapsed() > Duration::from_millis(500);
                     if ready && shared.play.lock().map(|p| p.is_none()).unwrap_or(false) {
                         let idx = pick_index.unwrap_or(0).min(n - 1);
                         let src = shared.sources.lock().unwrap().get(idx).cloned();
