@@ -23,32 +23,32 @@
 ## ルート / HBC
 
 - 取得: [SlopBro](https://github.com/throwaway96/slopbro)（jsserver 脆弱性、webOS 7 で有効）
-- HBC `org.webosbrew.hbchannel` v0.7.3 導入済み、`/var/lib/webosbrew/{startup.sh,init.d}` で永続化
+- HBC `org.webosbrew.hbchannel` v0.7.3 導入済み。`/var/lib/webosbrew/{startup.sh,init.d}` で永続化する。
 - root シェル: HBC の telnetd（23/tcp, パスワードなし）。不要時は
-  `touch /var/luna/preferences/webosbrew_telnet_disabled` で無効化
-- ファームウェア更新ブロック: `/var/luna/preferences/webosbrew_block_updates` + HBC startup が
-  `/etc/hosts` を bind mount して `su.lge.com` 系 4 ホストを 127.0.0.1 に落とす
+  `touch /var/luna/preferences/webosbrew_telnet_disabled` で無効化する。
+- ファームウェア更新ブロック: `/var/luna/preferences/webosbrew_block_updates` と HBC startup が
+  `/etc/hosts` を bind mount し、`su.lge.com` 系 4 ホストを 127.0.0.1 に落とす。
 
 ## 64bit 実行（bridge）
 
-- [webos-bridge-64to32](https://github.com/webosbrew/webos-bridge-64to32) v0.0.8 を導入済み
-- 静的リンクした aarch64 バイナリは bridge なしでも動く（実測）
-- GLES / Wayland を使う aarch64 アプリは bridge の共有メモリ IPC 経由（セルフテスト起動確認済み）
+- [webos-bridge-64to32](https://github.com/webosbrew/webos-bridge-64to32) v0.0.8 を導入済み。
+- 静的リンクした aarch64 バイナリは bridge なしでも動作する（実測）。
+- GLES / Wayland を使う aarch64 アプリは bridge の共有メモリ IPC 経由で動作する（セルフテスト起動確認済み）。
 
 ## Rust ツールチェーン
 
 - ホスト: rustc 1.91.1 + nightly 1.102.0
 - クロスビルド実績: `armv7-unknown-linux-musleabi`, `aarch64-unknown-linux-musl`
   （`-C linker=rust-lld -C link-self-contained=yes` で外部リンカ不要）
-- 実機へは HTTP で配布 → `curl` → 実行（root telnet 経由）
-- **注意**: `vmx` は `rust-version = 1.97` のため 1.91 では `--ignore-rust-version` が必要
+- 実機へは HTTP で配布し、`curl` で取得して実行する（root telnet 経由）。
+- **注意**: `vmx` は `rust-version = 1.97` のため、1.91 では `--ignore-rust-version` が必要。
 
 ## M0 実測（2026-11-20）
 
 - `webos-bridge-64to32` v0.0.8 を `luna://com.webos.appInstallService/dev/install` で導入成功
-  （root + `devmode_enabled` があれば HBC を介さず CLI から入れられる）
+  （root + `devmode_enabled` があれば HBC を介さず CLI から入れられる）。
 - 起動すると `external_test_64`（appinfo の `main`）が `service/gles_proxy` を子プロセスとして
-  spawn する（fds 3–6 を渡す）。GLES 描画（回転キューブ）まで確認
+  spawn する（fds 3–6 を渡す）。GLES 描画（回転キューブ）まで確認。
 - 同梱 lib（64bit）: `libEGL.so.1` / `libGLESv2.so.2` / `libwayland-client` / `libwayland-egl` /
   **`libSDL2-2.0.so.0.3000.12` (2.30.12-webos)** / **`libSDL3.so.0.4.16`** / alsa-lib / aarch64 glibc 一式
 - 外部 64bit アプリの要件:
@@ -56,37 +56,41 @@
   2. `patchelf --add-rpath <bridge>/lib <binary>`
   3. IPK 化は `ares-package -A arm` または `scripts/patch-aarch64-in-ipk.sh`
 - 既知の無害な警告: `/etc/ld.so.preload` の `/lib/libSegFault.so` が 32bit のため
-  `wrong ELF class: ELFCLASS32 ... ignored` が出る
-- 計測メモ: `load average` は常時 30 前後（`md_check_thread` 等のカーネルスレッドが D 状態で
-  常駐するため）。CPU 使用率の指標には使わない
+  `wrong ELF class: ELFCLASS32 ... ignored` が出る。
+- 計測メモ: `load average` は常時 30 前後である（`md_check_thread` 等のカーネルスレッドが D 状態で
+  常駐するため）。CPU 使用率の指標には使わない。
 
 ## M0 追加実測（2026-11-20 続き）
 
-### 動いたこと
-- `aarch64-unknown-linux-gnu` の Rust バイナリが **bridge 経由で起動**（crt1.o を明示リンクするのが必須）
-- IPK の手組み（`packaging/build-ipk.py`）でインストール成功
-- OMT の **DNS-SD ディスカバリと TCP 接続**が実機で動作（`omt://LOCALHOST:6400/Colorbars` を検出）
-- armv7 の A32 NEON は vmx-rs の `arm32-neon` feature（nightly）で実機テスト 26/26 パス
+### 動作したもの
+
+- `aarch64-unknown-linux-gnu` の Rust バイナリが **bridge 経由で起動**する（crt1.o を明示リンクするのが必須）。
+- IPK の手組み（`packaging/build-ipk.py`）でインストール成功。
+- OMT の **DNS-SD ディスカバリと TCP 接続**が実機で動作する（`omt://LOCALHOST:6400/Colorbars` を検出）。
+- armv7 の A32 NEON は vmx-rs の `arm32-neon` feature（nightly）で実機テスト 26/26 パス。
 
 ### 詰まっている点
-- アプリの SDL2 初期化（`SDL_Init`）で即クラッシュ。C で組んだ `external_test_64`（EGL/GLES 直叩き）は
-  動作するため、bridge の SDL2 を外部アプリから使う経路に問題がありそう。
+
+- アプリの SDL2 初期化（`SDL_Init`）で即クラッシュする。C で組んだ `external_test_64`（EGL/GLES 直叩き）は
+  動作するため、bridge の SDL2 を外部アプリから使う経路に問題がありそうである。
 - ログ: `target:` の直後、`SDL video driver = wayland` を出した直後にプロセスが消える（SIGSEGV）。
 - 次の候補:
   1. `external_test_64` と同じ **EGL/GLES2 + wayland 直叩き**に置き換える（実績あり）
   2. bridge 同梱の **SDL3 (0.4.16)** を使う
-  3. SDL2 の webOS ドライバが要求する env（`APPID`, `DISPLAY_ID`, `XDG_RUNTIME_DIR`）を確認
+  3. SDL2 の webOS ドライバが要求する env（`APPID`, `DISPLAY_ID`, `XDG_RUNTIME_DIR`）を確認する
 
 ## M0 続き2（2026-11-20）
 
 ### SDL2/SDL3 が使えない理由（確定）
+
 - bridge 同梱の **libxkbcommon 0.9.2** が webOS のキーマップを解釈できない:
   `Keycode too big: must be < 0xfff, got 0x5030` → `Failed to compile keymap`
-- SDL の wayland ドライバはその直後に NULL 参照で落ちる（SIGSEGV）
-- SDL3 も同じ xkbcommon を使うため、B 案（SDL3）はこの環境では成立しない見込み
+- SDL の wayland ドライバはその直後に NULL 参照で落ちる（SIGSEGV）。
+- SDL3 も同じ xkbcommon を使うため、B 案（SDL3）はこの環境では成立しない見込みである。
 
-### EGL/GLES2 直叩き（A案）は動作
-`csrc/presenter_egl.c` + `build-app.sh` で実装。**root シェルからは動作確認済み**（1080p60 入力）:
+### EGL/GLES2 直叩き（A案）は動作する
+
+`csrc/presenter_egl.c` + `build-app.sh` で実装した。**root シェルからは動作確認済み**（1080p60 入力）:
 
 ```
 fps=42.8 decode=5.89ms present=16.11ms cpu=117%
@@ -94,61 +98,73 @@ fps=38.3 decode=5.92ms present=16.77ms cpu=128%
 fps=42.4 decode=5.68ms present=16.42ms cpu=119%
 ```
 
-- `present` ≈ 16.4ms は eglSwapBuffers の vsync 待ち（60Hz）。decode と直列化しているため 42fps で頭打ち。
-- 改善: swap interval 0 にして最新フレーム優先でドロップする / decode と present を別スレッド化。
+- `present` ≈ 16.4ms は eglSwapBuffers の vsync 待ち（60Hz）。decode と直列化しているため 42fps で頭打ちになる。
+- 改善: swap interval 0 にして最新フレーム優先でドロップする。decode と present を別スレッド化する。
 
 ### 残る課題
-- **SAM から起動した場合のみ** `wl_display_connect` 直前でプロセスが消える（root シェルからは同じバイナリが動作）。
+
+- **SAM から起動した場合のみ** `wl_display_connect` 直前でプロセスが消える（root シェルからは同じバイナリが動作する）。
   jail/seccomp かコンポジタ側の制約と思われる。要調査（次は bridge アプリと同じ起動条件を突き合わせる）。
 
 ## 32bit ネイティブ経路（2026-11-20 続き3）— これが本線
 
-bridge を使わず、**TV 自身の 32bit EGL/GLESv2 + wayland** で描画する経路に切替。SAM 起動でも動作する。
+bridge を使わず、**TV 自身の 32bit EGL/GLESv2 + wayland** で描画する経路に切り替えた。SAM 起動でも動作する。
 
 ### ビルド要点（`build-app-armv7.sh`）
+
 - target: `armv7-unknown-linux-gnueabi`（soft-float）
 - `-C relocation-model=static -C link-arg=-no-pie`（sysroot の crt1.o が非PICのため）
 - crt1.o / crti.o / crtn.o を明示リンク（**これが無いと e_entry=0 で即死**）
-- `getauxval` が sysroot の古い glibc に無いので自前スタブ（/proc/self/auxv を読む）をリンク
+- `getauxval` が sysroot の古い glibc に無いため、自前スタブ（/proc/self/auxv を読む）をリンクする
 - SDL2 は使わない（`--no-default-features`、sdl_stub.rs にフォールバック）
 
 ### 実測（1080p60 カラーバー、SAM 起動）
+
 ```
 fps=18.8 decode=30.1ms present=12.9ms cpu=218%
 ```
+
 - 表示は `LSM NL_VSC {"app_id":"org.mikansei.omt-monitor","visible":true}`
 - decode が scalar VMX1 のため 30ms → 19fps 頭打ち（present は vsync 待ちで 13〜16ms）
 
 ### armv7 NEON の壁
-- `vmx` の `arm32-neon` feature は **LLVM の soft-float 制約**で `rustc-LLVM ERROR: Do not know how to soften this operator's operand!` になる
-- `lto = "thin"` を有効にすると vmx 自体はコンパイルできるが、最終バイナリの LTO で同じエラー
-- `+vfp3,+neon` のグローバル付与も不可（他クレートの float が壊れる）
-- 対策候補: (a) vmx を cdylib として別ビルドして C ABI で呼ぶ、(b) ホットループだけ C/asm で書く、(c) 64bit bridge 経路の proxy spawn を解決する
+
+- `vmx` の `arm32-neon` feature は **LLVM の soft-float 制約**で
+  `rustc-LLVM ERROR: Do not know how to soften this operator's operand!` になる。
+- `lto = "thin"` を有効にすると vmx 自体はコンパイルできるが、最終バイナリの LTO で同じエラーになる。
+- `+vfp3,+neon` のグローバル付与も不可（他クレートの float が壊れる）。
+- 対策候補: (a) vmx を cdylib として別ビルドして C ABI で呼ぶ、(b) ホットループだけ C/asm で書く、
+  (c) 64bit bridge 経路の proxy spawn を解決する
 
 ## NEON 有効化と 60fps の実測（ラウンド2）
 
 ### NEON を armv7 で有効化する方法（確定）
+
 - `armv7-unknown-linux-gnueabi`（soft-float）で A32 NEON を codegen すると LLVM が
-  `Do not know how to soften this operator's operand!` または `InstrEmitter::EmitRegSequence` でクラッシュ
-- 解決: **vmx クレートだけ** `-C target-feature=-soft-float,+neon` でコンパイル（RUSTC_WRAPPER で付与）
-  - VMX1 は整数演算のみなので、クレート境界に float が現れず ABI 破壊なし
-  - `RUSTC_WRAPPER` の変更は cargo のフィンガープリントに載らないため、vmx の fingerprint を消して再ビルドする
+  `Do not know how to soften this operator's operand!` または `InstrEmitter::EmitRegSequence` でクラッシュする。
+- 解決: **vmx クレートだけ** `-C target-feature=-soft-float,+neon` でコンパイルする（RUSTC_WRAPPER で付与）。
+  - VMX1 は整数演算のみのため、クレート境界に float が現れず ABI 破壊はない。
+  - `RUSTC_WRAPPER` の変更は cargo のフィンガープリントに載らないため、vmx の fingerprint を消して再ビルドする。
 - アプリ起動ログで確認: `vmx caps: neon=true ssse3=false avx2=false`
 
 ### 実測（TV 上、A55×4）
+
 | 解像度 | decode | present | fps |
 |---|---|---|---|
 | 1920x1080 | 29〜32 ms | 11〜12 ms | **31** |
 | 1280x720 | 17.5 ms | 4.8 ms | **55〜57** |
 
 vmx の公式ベンチ（`simd_report`, path=neon）を実機で実行した結果:
+
 ```
 1920x1080 load_from+decode_bgra: 36.2 ms/frame (27.6 fps)
 1920x1080 load_from+decode_uyvy: 29.4 ms/frame (34.0 fps)
 ```
+
 → **1080p60 は SoC のソフトウェアデコード能力の上限を超える**（NEON を使っても 34fps が天井）。
-720p なら 60fps 相当（55〜57fps）で安定。
+720p なら 60fps 相当（55〜57fps）で安定する。
 
 ### スレッド構成
-- 受信スレッド（OMT recv）と描画スレッド（EGL）を分離し、最新フレーム優先でドロップ
-- `eglSwapInterval(0)` で vsync 待ちを解除（present は 1080p で 11ms→アップロード律速）
+
+- 受信スレッド（OMT recv）と描画スレッド（EGL）を分離し、最新フレーム優先でドロップする。
+- `eglSwapInterval(0)` で vsync 待ちを解除する（present は 1080p で 11ms → アップロード律速）。

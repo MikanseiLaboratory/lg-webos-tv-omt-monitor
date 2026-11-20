@@ -1,100 +1,163 @@
 # lg-webos-tv-omt-monitor
 
-LG webOS テレビを **OMT (Open Media Transport)** のモニターにする、ネイティブアプリ実装。
+Native LG webOS app that receives an [OMT (Open Media Transport)](https://github.com/openmediatransport)
+stream and displays it full-screen on the TV, without a PC in the signal path.
 
-[OMT](https://github.com/openmediatransport) の受信ストリーム（VMX1 / TCP / DNS-SD）をテレビ上で直接デコードし、
-フルスクリーン表示 + 音声再生 + 遅延・ドロップなどのモニタリング OSD を提供する。
-
-> **Status: 実機動作中** — LG OLED48A2PJA (webOS 10.3.2) で 720p60 = 57〜59fps / 1080p = 30fps。
-> 詳細は [docs/STATUS.md](docs/STATUS.md)、設計は [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)。
+**Status: working on hardware.** LG OLED48A2PJA (webOS 10.3.2): 720p60 at 59-60 fps, 1080p at 30-31 fps.
+Details: [docs/STATUS.md](docs/STATUS.md).
 
 ---
 
-## なぜ作るか
+## What it does
 
-webOS には NDI / OMT の受信アプリが存在しない（2026-11 時点で公式・主要カスタムリポジトリ・GitHub を調査済み）。
-一方、放送・配信現場では「送出機の隣に置いたテレビで OMT をそのまま見たい」需要が強い。
-PC で受けて Moonlight で飛ばす構成は可能だが、余計なエンコードが 1 段入る。
+- Receives the OMT video stream over TCP from a sender (vMix, OBS, TouchDesigner, `omt-sender`, ...).
+- Decodes VMX1 in software on the CPU (NEON). There is no hardware codec path.
+- Presents BGRA frames with EGL/GLES2 on a Wayland surface.
+- Keeps the TV awake while streaming (`tvpowerd` screen-on request, re-sent every 30 s).
+- Finds OMT sources by DNS-SD and shows a source list on the TV.
 
-本プロジェクトは **テレビ上で直接 OMT を受けて表示する** ことを目指す。
+## Target device (measured)
 
-## ターゲット
-
-| 項目 | 実測値（開発機: OLED48A2PJA） |
+| Item | Value |
 |---|---|
-| 機種 / ボード | OLED48A2PJA / `K8HP_ARIB_JP` |
-| webOS | **10.3.2**（firmware 33.31.75） |
+| Model / board | OLED48A2PJA / `K8HP_ARIB_JP` |
+| webOS | 10.3.2 (firmware 33.31.75) |
 | Kernel | 5.4.268 aarch64 |
-| Userland | **armv7 (gnueabi, soft-float)** — 32bit |
-| CPU | 4 core Cortex-A55 / NEON (`asimd`) |
-| RAM | 1.7 GB（空き 400 MB 前後） |
+| Userland | armv7, 32-bit, GNU EABI soft-float (`/lib/ld-linux.so.3`) |
+| CPU | 4x Cortex-A55 with NEON (`asimd`) |
+| RAM | 1.7 GB (about 400 MB free) |
 | GPU | GLES2 / EGL |
-| 映像出力 | `libNDL` (Native Display Layer), GStreamer 1.0, SDL2 2.0.14 |
 
-32bit userland しかないため、**aarch64 でビルドした本アプリは
-[webos-bridge-64to32](https://github.com/webosbrew/webos-bridge-64to32) 経由で実行する**（NEON を使うため必須。
-32bit フォールバックでは VMX1 デコードが scalar になり実用速度が出ない）。
+The kernel is aarch64 and runs 32-bit ELF binaries. The userland is 32-bit only, so the 64-bit
+bridge is not used.
 
-## アーキテクチャ（予定）
+## Architecture
 
 ```
- OMT source (vMix / OBS / TouchDesigner / omt-sender ...)
-        │  TCP  (VMX1 video + PCM audio + metadata)
-        ▼
- ┌─────────────────────────────────────────────┐
- │ webOS app (Rust, aarch64)                   │
- │                                             │
- │  Discovery (DNS-SD / 手動IP)                │
- │        ↓                                    │
- │  openmediatransport-rs ReceiverSession      │
- │        ↓                                    │
- │  vmx (VMX1 decode, NEON) → BGRA frame       │
- │        ↓                                    │
- │  GLES2 presenter (texture upload)           │
- │        ↓                                    │
- │  EGL / Wayland surface (bridge-64to32)      │
- └─────────────────────────────────────────────┘
+ OMT source (vMix / OBS / omt-sender ...)
+        |  TCP  (VMX1 video + PCM audio + metadata)
+        v
+ webOS app (Rust, armv7 32-bit native)
+   discovery (DNS-SD) -> source picker
+        v
+   receive/decode thread: ReceiverSession -> vmx (NEON) -> BGRA
+        v
+   present thread: GLES2 texture upload -> EGL / Wayland surface
 ```
 
-## 依存
+- **32-bit native.** The app is built for `armv7-unknown-linux-gnueabi` and runs directly on the TV
+  against its own `libEGL.so` / `libGLESv2.so` / Wayland. No 64-to-32 bridge.
+- **Threads.** One receive/decode thread and one present thread. The present thread keeps the newest
+  frame and drops stale ones; `eglSwapInterval(0)` removes the vsync wait.
+- **Discovery.** DNS-SD enumerates OMT sources at start-up and the list is drawn on screen
+  (PSF console font `Agafari-16.psfu.gz`, rendered into a BGRA canvas).
+- **Source picker.** See [Source selection](#source-selection).
 
-- [MikanseiLaboratory/openmediatransport-rs](https://github.com/MikanseiLaboratory/openmediatransport-rs) — OMT プロトコル / Discovery
-- [MikanseiLaboratory/vmx-rs](https://github.com/MikanseiLaboratory/vmx-rs) — VMX1 コーデック（NEON）
-- [webosbrew/webos-bridge-64to32](https://github.com/webosbrew/webos-bridge-64to32) — aarch64 実行基盤（IPK）
-- [webosbrew/SDL-webOS](https://github.com/webosbrew/SDL-webOS) — SDL（採用可否は M0 で判断）
+## Build
 
-## 予定機能
-
-- OMT ソースの自動検出（DNS-SD）と手動 IP 指定
-- フルスクリーン表示（1080p60 を目標、4K は 1/8 プレビューまたは非対応）
-- 音声再生（A/V 同期）
-- モニタリング OSD: 解像度 / fps / bitrate / 受信遅延 / ドロップ / 再接続回数
-- 切断時の自動再接続、ソース切り替え
-- Homebrew Channel からのインストール（IPK + HBC リポジトリ）
-
-## ビルド（予定）
+Requirements: the webOS arm buildroot sysroot (`arm-webos-linux-gnueabi`) and nightly Rust
+(the `vmx` crate needs Rust 1.97; nightly 1.102.0 is used).
 
 ```bash
-# webOS SDK (arm-webos-linux-gnueabi buildroot) を用意したうえで
-cargo build --release --target aarch64-unknown-linux-gnu   # bridge 経由
-# 32bit フォールバック
-cargo build --release --target armv7-unknown-linux-gnueabi
+TC=/path/to/arm-webos-linux-gnueabi_sdk-buildroot ./build-app-armv7.sh
 ```
 
-パッケージングは `packaging/` の IPK ビルドスクリプト（`ares-package`）で行う。詳細は実装計画を参照。
+The script compiles the C sources (EGL presenter, wakelock, input, `getauxval` stub), then builds the
+Rust app with `--no-default-features --target armv7-unknown-linux-gnueabi`, and produces
+`build/omt-monitor-arm.ipk` via `packaging/build-ipk.py`.
 
-## ロードマップ
+Link notes:
 
-| 段階 | 内容 |
+| Item | Reason |
 |---|---|
-| M0 | 実行基盤スパイク（bridge / aarch64 / GLES / VMX デコード速度実測） |
-| M1 | OMT 発見・接続・統計表示（映像なし） |
-| M2 | 映像デコード + 表示（1080p30） |
-| M3 | 音声 + A/V 同期 |
-| M4 | UI / OSD / 再接続 |
-| M5 | 性能改善（1080p60 判定） |
-| M6 | IPK パッケージ / HBC リポジトリ / CI / リリース |
+| `crt1.o` / `crti.o` / `crtn.o` linked explicitly | Without them `e_entry` is 0 and the process dies immediately. |
+| `-C relocation-model=static -C link-arg=-no-pie` | The sysroot `crt1.o` is not PIC. |
+| `getauxval` stub | The sysroot glibc has no `getauxval`; the stub reads `/proc/self/auxv`. |
+| `-C target-feature=-soft-float,+neon` on the `vmx` crate only | Enables A32 NEON codegen. Applied through `RUSTC_WRAPPER` (`build/rustc-vmx-neon.py`). Other crates stay soft-float. |
+| Rebuild of `vmx` after the wrapper change | `RUSTC_WRAPPER` is not part of the cargo fingerprint, so `fingerprint/vmx-*` is deleted first. |
 
-## ライセンス
+## Install and run on the TV
+
+Requires Homebrew Channel and root. The IPK can then be installed from the CLI without dev mode.
+
+```bash
+luna-send -n 1 -f luna://com.webos.appInstallService/dev/install \
+  '{"id":"org.mikansei.omt-monitor","ipkUrl":"/tmp/omt.ipk","subscribe":true}'
+
+luna-send -n 1 -f luna://com.webos.applicationManager/launch \
+  '{"id":"org.mikansei.omt-monitor"}'
+```
+
+Logs are written to `run.log` in the app directory.
+
+## Source selection
+
+Remote-control input is not delivered to this client, so selection is driven by three mechanisms:
+
+1. `source.txt` in the app directory pins a fixed URL, for example
+   `omt://192.168.3.53:6400/Colorbars`. Playback starts without UI.
+2. The `index` launch parameter plays entry *n* of the discovered list:
+
+   ```bash
+   luna-send -n 1 -f luna://com.webos.applicationManager/launch \
+     '{"id":"org.mikansei.omt-monitor","params":{"index":1}}'
+   ```
+
+3. If neither is given, the first entry of the list auto-plays after 4 s.
+
+## Performance and constraints
+
+Measured on the target device (LG OLED48A2PJA, 4x Cortex-A55):
+
+| Input | decode | present | fps |
+|---|---|---|---|
+| 1280x720 @ 60 | 16.4-17.1 ms | 5.8-6.4 ms | 59-60 |
+| 1920x1080 @ 60 | 29-33 ms | 11-12 ms | 30-31 |
+
+`vmx` benchmark (`simd_report`, path = neon) on the device:
+
+```
+1920x1080 load_from+decode_uyvy: 29.4 ms/frame (34.0 fps)
+1920x1080 load_from+decode_bgra: 36.2 ms/frame (27.6 fps)
+```
+
+**1080p59.94 and 1080p60 are not achievable on this SoC.** The codec is decoded in software and the
+measured ceiling is about 34 fps for 1080p, so the stream is displayed at 30-31 fps. Do not claim
+1080p60 support.
+
+Hardware decoding is not an option. OMT carries VMX1 only, and the TV hardware decoders
+(NDL / GStreamer) support H.264, HEVC, VP9 and AV1, not VMX1.
+
+Remote-control input is not available to raw Wayland clients. `wl_keyboard` receives focus but no key
+events, and the networkinput pointer socket connects but yields no events. The `wl_webos_shell` shell
+role is not advertised to this client, so keys are not routed to the surface.
+
+## Requirements
+
+- Homebrew Channel installed and root access (needed to install the IPK without dev mode).
+- `webos-bridge-64to32` is **not** required.
+
+## Limitations
+
+- No audio. Video only.
+- No remote-control input. The app is switched or stopped from the system UI.
+- 1080p is capped at about 30-31 fps; 1080p60 is impossible with software VMX1 decoding.
+- The app must be installed as an IPK and launched through `applicationManager` (SAM).
+
+## Documentation
+
+- [docs/STATUS.md](docs/STATUS.md) — measured state on the device, wakelock, input findings
+- [docs/BUILD.md](docs/BUILD.md) — build steps and link details
+- [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) — goals, constraints, milestones
+- [docs/TARGET-NOTES.md](docs/TARGET-NOTES.md) — device probe results and measurement log
+
+## Related projects
+
+- [openmediatransport-rs](https://github.com/MikanseiLaboratory/openmediatransport-rs) — OMT protocol and discovery
+- [vmx-rs](https://github.com/MikanseiLaboratory/vmx-rs) — VMX1 codec (NEON)
+- [webos-bridge-64to32](https://github.com/webosbrew/webos-bridge-64to32) — 64-bit runtime for webOS (not used here)
+- [SDL-webOS](https://github.com/webosbrew/SDL-webOS) — SDL port evaluated during bring-up
+
+## License
 
 MIT

@@ -2,11 +2,12 @@
 
 ## 動作している構成
 
-- **armv7 32bit ネイティブ**（bridge 不要）。TV 自身の EGL/GLESv2 + wayland で描画
-- HBC からインストールした `org.mikansei.omt-monitor` を SAM 経由で起動
-- OMT ソースは DNS-SD で自動検出（`source.txt` があれば固定 URL を優先）
-- 受信スレッドと描画スレッドを分離し、最新フレーム優先でドロップ
-- vmx は `-C target-feature=-soft-float,+neon` でビルドして A32 NEON を有効化
+- **armv7 32bit ネイティブ**（bridge 不要）。TV 自身の EGL/GLESv2 + wayland で描画する。
+- HBC からインストールした `org.mikansei.omt-monitor` を SAM 経由で起動する。
+- OMT ソースは DNS-SD で自動検出する。`source.txt` があれば固定 URL を優先する。
+- 受信スレッドと描画スレッドを分離する。最新フレーム優先でドロップする。
+- vmx は `-C target-feature=-soft-float,+neon` でビルドし、A32 NEON を有効化する。
+- 無操作時の画面オフを防ぐため、tvpowerd へ画面復帰要求を送る（後述）。
 
 ## 実測（LG OLED48A2PJA / webOS 10.3.2 / Cortex-A55 ×4）
 
@@ -15,35 +16,35 @@
 | 1280x720 @60 | 16.4〜17.1 ms | 5.8〜6.4 ms | **59〜60** |
 | 1920x1080 @60 | 33 ms | 11 ms | **30〜31** |
 
-参考: vmx の `simd_report`（path=neon）を実機で実行
+参考: vmx の `simd_report`（path=neon）を実機で実行した結果。
 
 ```
 1920x1080 load_from+decode_uyvy: 29.4 ms/frame (34.0 fps)
 1920x1080 load_from+decode_bgra: 36.2 ms/frame (27.6 fps)
 ```
 
-**1080p60 はこの SoC のソフトウェアデコード上限（34fps）を超えるため不可能。**
-720p60 で 60fps 相当、1080p なら 30fps で安定動作する。
+**1080p60 はこの SoC のソフトウェアデコード上限（34fps）を超えるため不可能である。**
+720p60 なら 60fps 相当、1080p なら 30fps で安定動作する。
 
 ## スリープ対策（wakelock）
 
 webOS は入力無操作で画面を落とす（Screen Saver / Screen Off）。EGL で描画しているだけのネイティブアプリは
-「映像再生中」と認識されないため、アプリ側から tvpowerd に働きかける。
+「映像再生中」と認識されない。そのためアプリ側から tvpowerd を操作する。
 
 - `app/csrc/wakelock.c`（libluna-service2 + glib）
-  - 起動直後に `luna://com.webos.service.tvpower/power/turnOnScreen` を呼んで画面を起こす
-  - 30 秒ごとに同メソッドを再送（画面が落ちても最大 30 秒で復帰）
-  - `registerScreenSaverRequest` に自アプリ名で登録
-- 実機検証: `turnOffScreen` で画面を落とした状態からアプリ起動 → 直後に `state: Active` へ復帰。
-  再生を 3 分以上継続しても `state: Active` のまま（fps 59.4〜60.1 を維持）
+  - 起動直後に `luna://com.webos.service.tvpower/power/turnOnScreen` を呼び、画面を起こす。
+  - 30 秒ごとに同メソッドを再送する（画面が落ちても最大 30 秒で復帰する）。
+  - `registerScreenSaverRequest` に自アプリ名で登録する。
+- 実機検証: `turnOffScreen` で画面を落とした状態からアプリを起動すると、直後に `state: Active` へ復帰する。
+  再生を 3 分以上続けても `state: Active` を維持する（fps 59.4〜60.1）。
 
 ## ハードウェアデコードの可否（調査結果）
 
-- OMT の映像は **VMX1 のみ**（`omtrs/PROTOCOL.md` に Codec FourCC はあるが、実装は VMX1 パススルーのみ）
-- TV のハードウェアデコーダ（NDL / GStreamer）は H.264 / HEVC / VP9 / AV1 用で **VMX1 非対応**
-- vmx には `wgpu` feature（GPU デコード）があるが、webOS 10 のアプリ向け Vulkan は無く、
-  8x8 ブロック単位のデコードは GPU の起動オーバーヘッドに負ける可能性が高い
-- 結論: **1080p60 は不可**（NEON CPU デコードで 34fps が上限）。720p60 で 60fps 達成
+- OMT の映像は **VMX1 のみ**である（`omtrs/PROTOCOL.md` に Codec FourCC はあるが、実装は VMX1 パススルーのみ）。
+- TV のハードウェアデコーダ（NDL / GStreamer）は H.264 / HEVC / VP9 / AV1 用であり、**VMX1 に対応しない**。
+- vmx には `wgpu` feature（GPU デコード）がある。ただし webOS 10 のアプリ向け Vulkan は無く、
+  8x8 ブロック単位のデコードは GPU の起動オーバーヘッドに負ける可能性が高い。
+- 結論: **1080p60 は不可**（NEON CPU デコードで 34fps が上限）。720p60 で 60fps を達成する。
 
 ## 操作
 
@@ -58,32 +59,34 @@ luna-send -n 1 -f luna://com.webos.appInstallService/dev/install \
 
 - 起動: `luna-send -n 1 -f luna://com.webos.applicationManager/launch '{"id":"org.mikansei.omt-monitor"}'`
 - ログ: アプリディレクトリの `run.log`
-- 固定ソースにしたい場合は同ディレクトリに `source.txt`（例 `omt://192.168.3.53:6400/Colorbars`）
+- 固定ソースにしたい場合は同ディレクトリに `source.txt` を置く（例 `omt://192.168.3.53:6400/Colorbars`）
 
 ## 既知の制限
 
-- 1080p60 は不可（上記）。720p60 か 1080p30 を推奨
-- 音声は未実装（映像のみ）
-- 入力（リモコン）処理は未実装。終了はアプリ切替で
+- 1080p60 は不可（上記）。720p60 か 1080p30 を推奨する。
+- 音声は未実装（映像のみ）。
+- 入力（リモコン）処理は未実装。終了はアプリ切替で行う。
 
 ## ソース選択 UI と入力の現状（2026-11-20 追記）
 
 ### 実装したもの
-- 起動時に DNS-SD で OMT ソースを列挙し、**TV 上に一覧を描画**（PSF コンソールフォントを
-  `/usr/share/consolefonts/Agafari-16.psfu.gz` から読み込み、BGRA キャンバスに描いて提示）
-- 選択中の行をハイライト表示、アドレスも併記
+
+- 起動時に DNS-SD で OMT ソースを列挙し、**TV 上に一覧を描画する**（PSF コンソールフォントを
+  `/usr/share/consolefonts/Agafari-16.psfu.gz` から読み込み、BGRA キャンバスに描いて提示する）。
+- 選択中の行をハイライト表示し、アドレスも併記する。
 - 選択方法（現状）:
-  1. `source.txt` があれば固定 URL を再生（ヘッドレス）
-  2. 起動パラメータ `params.index` で一覧の n 番目を再生
+  1. `source.txt` があれば固定 URL を再生する（ヘッドレス）。
+  2. 起動パラメータ `params.index` で一覧の n 番目を再生する。
      `luna-send -n 1 -f luna://com.webos.applicationManager/launch '{"id":"org.mikansei.omt-monitor","params":{"index":1}}'`
-  3. 何も指定が無ければ **4 秒後に一覧の先頭を自動再生**
+  3. 何も指定が無ければ **4 秒後に一覧の先頭を自動再生**する。
 
 ### リモコン入力が届かない件（実測）
+
 - `wl_seat` / `wl_keyboard` はバインドでき、`kbd enter (focus)` も受信するが、
-  **キーイベントが 1 件も来ない**
+  **キーイベントが 1 件も来ない**。
 - `/tmp/netinput.pointer.sock`（`luna://com.webos.service.networkinput/getPointerInputSocket` で取得）は
-  接続できるが、やはりイベントが来ない（ソケットは root:root 770 のため `chmod 777` が必要）
+  接続できるが、やはりイベントが来ない（ソケットは root:root 770 のため `chmod 777` が必要）。
 - 原因の推定: コンポジタが `wl_webos_shell` / `wl_shell` を公開しておらず（実測でグローバル一覧に無い）、
-  アプリ用のシェルロールを持たないサーフェスにはリモコン入力をルーティングしない
-- 対策案: **SDL2 ベースのプレゼンタに差し替える**。Moonlight（SDL）はリモコン入力が動いており、
-  arm sysroot には SDL2 のヘッダと `libSDL2.so` が揃っている（32bit ネイティブのまま移行可能）
+  アプリ用のシェルロールを持たないサーフェスにはリモコン入力をルーティングしない。
+- 対策: **SDL2 ベースのプレゼンタ**（`app/csrc/presenter_sdl.c`）を実装済み。`presenter.txt` に `sdl` を書くと SDL 経路で起動する。Moonlight（SDL）はリモコン入力が動作しており、
+  arm sysroot には SDL2 のヘッダと `libSDL2.so` が揃っている（32bit ネイティブのまま移行可能）。

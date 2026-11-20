@@ -1,10 +1,40 @@
-# ビルド手順（aarch64 + 64to32 bridge）
+# ビルド手順
 
-現状のビルドは **aarch64 (64bit) + webos-bridge-64to32** を前提にしている。
-32bit (armv7) は vmx-rs の `arm32-neon` feature（nightly）でデコードは可能だが、
-glibc 起動時の問題を回避できていないため未採用。
+現在の本線は **32bit ネイティブ（armv7、bridge 不要）** である。ビルドは `build-app-armv7.sh` が行う。
+初期に使っていた aarch64 + 64to32 bridge の手順は「2. aarch64 + 64to32 bridge（初期の経路）」に残す。
 
-## 1. ツールチェーン（sysroot のみ使用）
+## 1. armv7 ネイティブ（現在の本線）
+
+必要なもの: webOS arm buildroot の sysroot（`arm-webos-linux-gnueabi`）と nightly Rust。
+
+```bash
+TC=/path/to/arm-webos-linux-gnueabi_sdk-buildroot ./build-app-armv7.sh
+```
+
+スクリプトは C プレゼンタ / wakelock / input をコンパイルし、Rust アプリを
+`--no-default-features --target armv7-unknown-linux-gnueabi` でビルドして、
+`packaging/build-ipk.py` で `build/omt-monitor-arm.ipk` を生成する。
+
+リンク要点:
+
+| 項目 | 理由 |
+|---|---|
+| crt1.o / crti.o / crtn.o を明示リンク | 無いと `e_entry=0` になり起動直後に落ちる |
+| `-C relocation-model=static -C link-arg=-no-pie` | sysroot の crt1.o が非 PIC のため |
+| `getauxval` の自前スタブ | sysroot の glibc に `getauxval` が無いため（/proc/self/auxv を読む） |
+| vmx クレートのみ `-C target-feature=-soft-float,+neon` | A32 NEON を有効化するため。`RUSTC_WRAPPER` で付与する |
+| `--no-default-features` | Rust 側の `sdl2` feature を無効化する（`sdl_stub.rs` にフォールバック） |
+
+`RUSTC_WRAPPER` の変更は cargo のフィンガープリントに載らないため、スクリプトは
+vmx の fingerprint を消してから再ビルドする。詳細は [TARGET-NOTES.md](TARGET-NOTES.md) を参照。
+
+## 2. aarch64 + 64to32 bridge（初期の経路）
+
+初期は aarch64 (64bit) + webos-bridge-64to32 を前提としていた。当時、32bit (armv7) は
+vmx-rs の `arm32-neon` feature（nightly）でデコードは可能だったが、glibc 起動時の問題を
+回避できていないため未採用だった。
+
+### 2.1 ツールチェーン（sysroot のみ使用）
 
 ```bash
 # webOS SDK buildroot（ホストバイナリは Linux 用なので macOS では sysroot だけ使う）
@@ -33,15 +63,15 @@ export RUSTFLAGS="\
   `libSDL2 → libm` のような間接依存が解決できない。
 - `<bridge-lib-copy>` は IPK から展開した `lib/`（リンク時のみ使用）。
 
-## 2. ビルド & パッケージ
+### 2.2 ビルド & パッケージ
 
 ```bash
 cargo +nightly build --release --target aarch64-unknown-linux-gnu   # MSRV 1.97 のため nightly
 python3 packaging/build-ipk.py --bin target/aarch64-unknown-linux-gnu/release/omt-monitor
 ```
 
-## 3. 実機での確認
+### 2.3 実機での確認
 
-- `luna://com.webos.appInstallService/dev/install` で IPK を投入（root があれば devmode_enabled で通る）
+- `luna://com.webos.appInstallService/dev/install` で IPK を投入する（root があれば devmode_enabled で通る）。
 - 起動: `luna://com.webos.applicationManager/launch {"id":"org.mikansei.omt-monitor"}`
-- ログはアプリのディレクトリの `run.log`（アプリは jail 内で /tmp が private のため）
+- ログはアプリのディレクトリの `run.log`（アプリは jail 内で /tmp が private のため）。

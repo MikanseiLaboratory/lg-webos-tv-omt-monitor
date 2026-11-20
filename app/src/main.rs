@@ -66,6 +66,10 @@ unsafe extern "C" {
     fn wakelock_start() -> i32;
     fn presenter_pointer_y() -> i32;
     fn input_set_logger(cb: extern "C" fn(*const core::ffi::c_char));
+    fn sdl_presenter_init(w: i32, h: i32) -> i32;
+    fn sdl_presenter_frame(pixels: *const u8, w: i32, h: i32) -> i32;
+    fn sdl_presenter_poll_key(code: *mut i32) -> i32;
+    fn sdl_presenter_shutdown();
     fn input_probe() -> i32;
 }
 
@@ -379,14 +383,66 @@ fn main() {
             presenter_set_log(c_log);
             presenter_set_key_handler(c_key);
         }
-        let rc = unsafe { presenter_init(UI_W as i32, UI_H as i32) };
-        if rc != 0 {
-            info!("EGL presenter init failed: {rc}");
-            pres.quit.store(true, Ordering::SeqCst);
-            pres.cv.notify_all();
-            return;
+        let want_sdl = std::env::current_exe()
+            .ok()
+            .and_then(|e| e.parent().map(|d| d.join("presenter.txt")))
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .map(|t| t.trim() == "sdl")
+            .unwrap_or(false);
+
+        let mut use_sdl = false;
+        if want_sdl {
+            let rc = unsafe { sdl_presenter_init(UI_W as i32, UI_H as i32) };
+            if rc == 0 {
+                use_sdl = true;
+                info!("SDL presenter ready");
+            } else {
+                info!("SDL presenter init failed: {rc}");
+            }
         }
-        info!("EGL presenter ready");
+        if !use_sdl {
+            let rc = unsafe { presenter_init(UI_W as i32, UI_H as i32) };
+            if rc != 0 {
+                info!("EGL presenter init failed: {rc}");
+                pres.quit.store(true, Ordering::SeqCst);
+                pres.cv.notify_all();
+                return;
+            }
+            info!("EGL presenter ready");
+        }
+
+        // pump input: SDL events when available, wayland otherwise
+        let pump = move |pres: &Shared| {
+            if use_sdl {
+                loop {
+                    let mut code = 0i32;
+                    match unsafe { sdl_presenter_poll_key(&mut code) } {
+                        1 => {
+                            let mapped = match code {
+                                0x4000_0052 => Some(KEY_UP),
+                                0x4000_0051 => Some(KEY_DOWN),
+                                13 | 0x4000_0058 => Some(KEY_ENTER),
+                                27 | 8 | 0x4000_0086 => Some(KEY_BACK),
+                                _ => {
+                                    info!("sdl key {code:#x}");
+                                    None
+                                }
+                            };
+                            if let Some(c) = mapped {
+                                KEYQ.get_or_init(|| Mutex::new(Vec::new()))
+                                    .lock()
+                                    .map(|mut q| q.push((c, true)))
+                                    .ok();
+                            }
+                        }
+                        2 => pres.quit.store(true, Ordering::SeqCst),
+                        _ => break,
+                    }
+                }
+            } else {
+                let _ = unsafe { presenter_roundtrip() };
+            }
+        };
 
         let font = font::Font::load();
         info!("font loaded: {}", font.is_some());
@@ -401,7 +457,7 @@ fn main() {
         let mut last_picker: Option<Instant> = None;
 
         loop {
-            let _ = unsafe { presenter_roundtrip() };
+            pump(&pres);
             handle_keys(&pres);
 
             if pres.quit.load(Ordering::SeqCst) {
@@ -413,7 +469,11 @@ fn main() {
                 let now = Instant::now();
                 if last_picker.map(|t| t.elapsed() > Duration::from_millis(150)).unwrap_or(true) {
                     draw_picker(&pres, &font, &mut canvas);
-                    let _ = unsafe { presenter_frame(canvas.as_ptr(), UI_W as i32, UI_H as i32) };
+                    if use_sdl {
+                        let _ = unsafe { sdl_presenter_frame(canvas.as_ptr(), UI_W as i32, UI_H as i32) };
+                    } else {
+                        let _ = unsafe { presenter_frame(canvas.as_ptr(), UI_W as i32, UI_H as i32) };
+                    }
                     last_picker = Some(now);
                 }
                 std::thread::sleep(Duration::from_millis(30));
@@ -425,7 +485,7 @@ fn main() {
             while slot.is_none() && !pres.quit.load(Ordering::SeqCst) {
                 let (g, _) = pres.cv.wait_timeout(slot, Duration::from_millis(100)).unwrap();
                 slot = g;
-                let _ = unsafe { presenter_roundtrip() };
+                pump(&pres);
                 handle_keys(&pres);
                 if pres.mode.load(Ordering::SeqCst) == MODE_PICKER {
                     break;
@@ -440,7 +500,11 @@ fn main() {
             drop(slot);
 
             let t0 = Instant::now();
-            let _ = unsafe { presenter_frame(px.as_ptr(), w, h) };
+            if use_sdl {
+                let _ = unsafe { sdl_presenter_frame(px.as_ptr(), w, h) };
+            } else {
+                let _ = unsafe { presenter_frame(px.as_ptr(), w, h) };
+            }
             pres_us += t0.elapsed().as_micros() as u64;
             frames += 1;
             dec_us += pres.decode_us.swap(0, Ordering::Relaxed);
@@ -467,7 +531,11 @@ fn main() {
                 cpu_start = cpu_seconds();
             }
         }
-        unsafe { presenter_shutdown() };
+        if use_sdl {
+            unsafe { sdl_presenter_shutdown() };
+        } else {
+            unsafe { presenter_shutdown() };
+        }
         info!("presenter stopped");
     });
 
