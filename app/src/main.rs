@@ -70,6 +70,10 @@ unsafe extern "C" {
     fn sdl_presenter_set_log(cb: extern "C" fn(*const core::ffi::c_char));
     fn sdl_presenter_frame(pixels: *const u8, w: i32, h: i32) -> i32;
     fn sdl_presenter_poll_key(code: *mut i32) -> i32;
+    fn audio_open(rate: i32, channels: i32) -> i32;
+    fn audio_push(interleaved: *const f32, frames: i32);
+    fn audio_close();
+    fn audio_level_frames() -> i32;
     fn sdl_presenter_size(w: *mut i32, h: *mut i32);
     fn sdl_presenter_shutdown();
     fn input_probe() -> i32;
@@ -108,6 +112,8 @@ struct Shared {
     play: Mutex<Option<Source>>,
     decode_us: AtomicU64,
     decode_frames: AtomicU64,
+    audio_frames: AtomicU64,
+    audio_drops: AtomicU64,
     ptr_y: Mutex<i32>,
 }
 
@@ -123,6 +129,8 @@ impl Shared {
             play: Mutex::new(None),
             decode_us: AtomicU64::new(0),
             decode_frames: AtomicU64::new(0),
+            audio_frames: AtomicU64::new(0),
+            audio_drops: AtomicU64::new(0),
             ptr_y: Mutex::new(0),
         }
     }
@@ -197,9 +205,81 @@ fn discover(timeout: Duration) -> Vec<Source> {
     out
 }
 
+/// Interleave one planar FPA1 frame and queue it for playback.
+struct AudioPacer {
+    start: Instant,
+    pushed: u64,
+    rate: f64, /* frames per second */
+}
+
+impl AudioPacer {
+    fn new(rate: f64) -> Self {
+        AudioPacer { start: Instant::now(), pushed: 0, rate }
+    }
+
+    /// Allow realtime rate plus a small jitter buffer.
+    fn allow(&self, buffer_frames: f64) -> bool {
+        let allowed = self.start.elapsed().as_secs_f64() * self.rate + buffer_frames;
+        (self.pushed as f64) < allowed
+    }
+}
+
+fn pump_audio(
+    session: &ReceiverSession,
+    audio: &mut Option<(i32, i32)>,
+    pacer: &mut Option<AudioPacer>,
+    counter: &AtomicU64,
+) -> u64 {
+    let mut frames_out = 0u64;
+    while let Some(a) = session.try_recv_audio() {
+        let ch = a.channels as usize;
+        let n = a.samples_per_channel as usize;
+        if ch == 0 || n == 0 {
+            continue;
+        }
+        let need_open = match *audio {
+            Some((r, c)) => r != a.sample_rate || c as usize != ch,
+            None => true,
+        };
+        if need_open {
+            *audio = Some((a.sample_rate, ch as i32));
+            unsafe { audio_open(a.sample_rate, ch as i32) };
+            info!("audio {} Hz, {} ch", a.sample_rate, ch);
+        }
+        let bytes = &a.pcm_planar_f32;
+        if bytes.len() < ch * n * 4 {
+            continue;
+        }
+        let mut out = vec![0f32; n * ch];
+        for c in 0..ch {
+            let base = c * n * 4;
+            for i in 0..n {
+                let o = base + i * 4;
+                out[i * ch + c] =
+                    f32::from_le_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]]);
+            }
+        }
+        let rate = a.sample_rate as f64 / n as f64;
+        let p = pacer.get_or_insert_with(|| AudioPacer::new(rate));
+        // Bound the buffered latency: drop frames that would exceed ~250 ms.
+        let max_frames = (a.sample_rate / 4).max(1);
+        if unsafe { audio_level_frames() } > max_frames {
+            continue;
+        }
+        if !p.allow(rate * 0.12) {
+            continue;
+        }
+        unsafe { audio_push(out.as_ptr(), n as i32) };
+        p.pushed += 1;
+        frames_out += 1;
+        counter.fetch_add(1, Ordering::Relaxed);
+    }
+    frames_out
+}
+
 fn connect(url: &str, addresses: &[String]) -> Result<ReceiverSession, String> {
     let cfg = ReceiverConfig {
-        frame_types: FrameType::VIDEO,
+        frame_types: FrameType::VIDEO | FrameType::AUDIO,
         connect_timeout: Duration::from_secs(5),
         ..ReceiverConfig::default()
     };
@@ -320,7 +400,7 @@ fn handle_keys(shared: &Shared) -> () {
                 }
                 _ => {}
             }
-        } else if matches!(code, KEY_UP | KEY_DOWN | KEY_ENTER | KEY_BACK) {
+        } else if true {
             info!("back to picker (key {code})");
             *shared.play.lock().unwrap() = None;
             shared.mode.store(MODE_PICKER, Ordering::SeqCst);
@@ -538,12 +618,15 @@ fn main() {
                 let dn = dec_frames.max(1) as f64;
                 let cpu = (cpu_seconds() - cpu_start) / secs * 100.0;
                 info!(
-                    "fps={:.1} decode={:.2}ms present={:.2}ms cpu={:.0}% frames={}",
+                    "fps={:.1} decode={:.2}ms present={:.2}ms cpu={:.0}% frames={} aframes={} adrop={} abuf={}ms",
                     frames as f64 / secs,
                     dec_us as f64 / dn / 1000.0,
                     pres_us as f64 / n / 1000.0,
                     cpu,
-                    frames
+                    frames,
+                    pres.audio_frames.load(Ordering::Relaxed),
+                    pres.audio_drops.load(Ordering::Relaxed),
+                    unsafe { audio_level_frames() } / 48
                 );
                 frames = 0;
                 dec_us = 0;
@@ -573,6 +656,8 @@ fn main() {
     let mut last_disco = Instant::now() - Duration::from_secs(10);
     let mut session: Option<ReceiverSession> = None;
     let mut current_url = String::new();
+    let mut audio_state: Option<(i32, i32)> = None;
+    let mut audio_pacer: Option<AudioPacer> = None;
 
     while !shared.quit.load(Ordering::SeqCst) {
         // refresh the source list every 3 s (and always while in the picker)
@@ -655,15 +740,23 @@ fn main() {
                     .fetch_add(t0.elapsed().as_micros() as u64, Ordering::Relaxed);
                 shared.decode_frames.fetch_add(1, Ordering::Relaxed);
                 shared.publish(frame.pixels, frame.width as i32, frame.height as i32);
+                pump_audio(s, &mut audio_state, &mut audio_pacer, &shared.audio_frames);
+                shared
+                    .audio_drops
+                    .store(s.statistics().frames_dropped_audio, Ordering::Relaxed);
             }
             None => {
-                // nothing decoded in time; keep looping
+                pump_audio(s, &mut audio_state, &mut audio_pacer, &shared.audio_frames);
+                shared
+                    .audio_drops
+                    .store(s.statistics().frames_dropped_audio, Ordering::Relaxed);
             }
         }
     }
 
     shared.quit.store(true, Ordering::SeqCst);
     shared.cv.notify_all();
+    unsafe { audio_close() };
     let _ = presenter.join();
     info!("bye");
 }

@@ -12,7 +12,7 @@ sdl2 = []
 
 [dependencies]
 flate2 = "1"
-openmediatransport = { git = "https://github.com/MikanseiLaboratory/openmediatransport-rs" }
+openmediatransport = { path = "../deps/openmediatransport-rs" }
 vmx = { version = "0.2", features = ["arm32-neon"] }
 
 

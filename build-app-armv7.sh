@@ -24,6 +24,8 @@ clang --target=armv7-linux-gnueabi --sysroot="$SYS" -O2 -fPIC \
   -c "$APP/csrc/input.c" -o "$HERE/build/input.o"
 clang --target=armv7-linux-gnueabi --sysroot="$SYS" -O2 -fPIC \
   -c "$APP/csrc/presenter_sdl.c" -o "$HERE/build/presenter_sdl.o"
+clang --target=armv7-linux-gnueabi --sysroot="$SYS" -O2 -fPIC \
+  -c "$APP/csrc/audio_sdl.c" -o "$HERE/build/audio_sdl.o"
 
 echo "== building Rust app (armv7)"
 export RUSTC_WRAPPER="$HERE/build/rustc-vmx-neon.py"
@@ -34,7 +36,7 @@ RUSTFLAGS="\
  -C relocation-model=static -C linker=rust-lld -C link-arg=-no-pie \
  -C link-arg=$SYS/usr/lib/crt1.o -C link-arg=$SYS/usr/lib/crti.o -C link-arg=$SYS/usr/lib/crtn.o \
  -C link-arg=$HERE/build/getauxval_stub.o \
- -C link-arg=$HERE/build/presenter_egl_arm.o -C link-arg=$HERE/build/wakelock.o -C link-arg=$HERE/build/input.o -C link-arg=$HERE/build/presenter_sdl.o \
+ -C link-arg=$HERE/build/presenter_egl_arm.o -C link-arg=$HERE/build/wakelock.o -C link-arg=$HERE/build/input.o -C link-arg=$HERE/build/presenter_sdl.o -C link-arg=$HERE/build/audio_sdl.o \
  -C link-arg=-L$HERE/build/nolibgcc \
  -C link-arg=--sysroot=$SYS \
  -C link-arg=-L$SYS/usr/lib -C link-arg=-L$SYS/lib -C link-arg=-L$GCCL \

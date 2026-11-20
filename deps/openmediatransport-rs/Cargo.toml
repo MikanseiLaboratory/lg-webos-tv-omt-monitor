@@ -1,0 +1,65 @@
+[package]
+name = "openmediatransport"
+version = "0.2.1"
+edition = "2024"
+rust-version = "1.97"
+license = "MIT"
+description = "Pure Rust Open Media Transport (OMT) protocol implementation"
+authors = ["MikanseiLaboratory"]
+readme = "README.md"
+repository = "https://github.com/MikanseiLaboratory/openmediatransport-rs"
+homepage = "https://github.com/MikanseiLaboratory/openmediatransport-rs"
+keywords = ["omt", "video", "audio", "networking", "streaming"]
+categories = ["network-programming", "multimedia::video", "multimedia::audio"]
+
+[lib]
+name = "openmediatransport"
+path = "src/lib.rs"
+
+[features]
+default = []
+tokio = ["dep:tokio"]
+wgpu = ["dep:wgpu", "vmx/wgpu"]
+
+[dependencies]
+thiserror = "2"
+bytes = "1"
+tracing = "0.1"
+socket2 = "0.6"
+mdns-sd = "0.20"
+roxmltree = "0.21"
+vmx = "0.2.1"
+wgpu = { version = "30.0.0", optional = true, default-features = true }
+tokio = { version = "1", optional = true, features = ["net", "rt", "rt-multi-thread", "sync", "time", "macros", "io-util"] }
+
+[dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+
+[[example]]
+name = "discovery"
+
+[[example]]
+name = "send_receive"
+
+[[example]]
+name = "send_receive_tokio"
+required-features = ["tokio"]
+
+[[example]]
+name = "receive_to_jpeg"
+
+[[example]]
+name = "receive_to_jpeg_tokio"
+required-features = ["tokio"]
+
+[[example]]
+name = "send_colorbar"
+
+[[example]]
+name = "send_colorbar_tokio"
+required-features = ["tokio"]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+opt-level = 3
