@@ -13,6 +13,7 @@ Details: [docs/STATUS.md](docs/STATUS.md).
 - Receives the OMT video stream over TCP from a sender (vMix, OBS, TouchDesigner, `omt-sender`, ...).
 - Decodes VMX1 in software on the CPU (NEON). There is no hardware codec path.
 - Presents BGRA frames with EGL/GLES2 on a Wayland surface.
+- Plays the OMT audio stream (FPA1) through SDL2.
 - Keeps the TV awake while streaming (`tvpowerd` screen-on request, re-sent every 30 s).
 - Finds OMT sources by DNS-SD and shows a source list on the TV.
 
@@ -138,6 +139,16 @@ writing `egl` to `presenter.txt` switches back to the raw EGL path, which has no
 
 - Homebrew Channel installed and root access (needed to install the IPK without dev mode).
 - `webos-bridge-64to32` is **not** required.
+
+## Audio path
+
+OMT carries audio as FPA1 (planar float32). The receiver interleaves it, bounds the
+buffered latency to 250 ms, and pushes it into an SDL2 device opened at the source
+sample rate. Frames that would exceed the latency budget are dropped, so playback
+stays close to live. The receive loop drains the audio queue on every iteration.
+
+The vendored `deps/openmediatransport-rs` is the upstream crate with `AUDIO_Q`
+raised from 10 to 64 frames, which removed most of the receiver-side audio drops.
 
 ## Limitations
 

@@ -51,7 +51,7 @@ int audio_open(int sample_rate, int channels)
   want.freq = sample_rate;
   want.format = AUDIO_F32SYS;
   want.channels = (Uint8)channels;
-  want.samples = 1024;
+  want.samples = 2048;
   want.callback = audio_callback;
 
   g_channels = channels;

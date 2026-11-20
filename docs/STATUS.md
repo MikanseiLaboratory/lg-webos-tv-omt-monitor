@@ -92,3 +92,12 @@ luna-send -n 1 -f luna://com.webos.appInstallService/dev/install \
   `presenter.txt` に `egl` を書くと従来の EGL 経路に戻る。
 - SDL の描画は `SDL_RenderSetLogicalSize` でキャンバス全体を出力に合わせる（サーフェスサイズ差による欠けを防ぐ）Moonlight（SDL）はリモコン入力が動作しており、
   arm sysroot には SDL2 のヘッダと `libSDL2.so` が揃っている（32bit ネイティブのまま移行可能）。
+
+## 音声（2026-11-20 追記）
+
+- OMT の FPA1（planar float32）を受信し、インターリーブして SDL2 オーディオで再生する
+- 受信ループのたびに `try_recv_audio` をすべて排出し、音声キューを詰まらせない
+- `AUDIO_Q` を 10 → 64 フレームに拡張した crate を `deps/openmediatransport-rs` に vendored 化
+- 再生バッファは最大 250 ms に制限（超過分は破棄）、SDL のコールバックバッファは 2048 サンプル
+- 実測: `adrop` は 25/s 程度 → 4/s 程度まで減少、`abuf` は 60〜220 ms で推移
+-  Wi-Fi 経由ではジッタで微小な途切れが残る（有線なら改善見込み）
