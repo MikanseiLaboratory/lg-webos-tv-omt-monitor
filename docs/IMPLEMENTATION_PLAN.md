@@ -207,3 +207,29 @@ docs/
 - bridge: https://github.com/webosbrew/webos-bridge-64to32
 - SDL for webOS: https://github.com/webosbrew/SDL-webOS
 - 参考実装（ネイティブ webOS アプリ）: https://github.com/mariotaku/moonlight-tv
+
+---
+
+## 11. A32 (armv7) 対応の扱い — 実測と結論
+
+開発機（OLED48A2PJA / webOS 10.3.2）で以下を実測した。
+
+| 項目 | 結果 |
+|---|---|
+| ユーザーランド ABI | **armv7 32bit**（`/bin/busybox` は ELFCLASS32 / EM_ARM、`getconf LONG_BIT=32`、loader は `ld-linux.so.3` = soft-float EABI） |
+| カーネル | aarch64 → **静的リンクした aarch64 バイナリは bridge なしでそのまま実行できる**（実機で確認） |
+| armv7 静的バイナリ | 実機で実行確認（`armv7-unknown-linux-musleabi`） |
+| `vmx` の armv7 ビルド | stable Rust でビルド可（ただし **scalar パスのみ**） |
+| Rust の A32 NEON intrinsic | **未安定**（`stdarch_arm_neon_intrinsics`, rust-lang/rust#111800）。rustc 1.102.0-nightly (2026-11-19) でも `E0658` |
+
+### 結論
+
+- **armv7 向けに NEON カーネルを追加する PR は作らない。** stable Rust では A32 NEON intrinsic が使えず、
+  `#![feature(stdarch_arm_neon_intrinsics)]`（nightly 限定）を要求するコードは上流に取り込めないため。
+- 32bit フォールバックは **scalar のみ**となり、VMX1 1080p のリアルタイム再生は現実的でない（参考値の取得は今後）。
+- したがって本プロジェクトは **aarch64 + [webos-bridge-64to32](https://github.com/webosbrew/webos-bridge-64to32) を唯一の本線**とする。
+  実機で bridge IPK v0.0.8 のインストールとセルフテスト起動まで確認済み。
+
+将来 A32 NEON が安定化した場合の再検討条件:
+1. `stdarch_arm_neon_intrinsics` が stable に降りる
+2. かつ、A55 4 コアで VMX1 1080p60 のデコードが 45fps 以上出る
