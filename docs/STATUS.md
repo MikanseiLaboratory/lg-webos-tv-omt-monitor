@@ -88,5 +88,7 @@ luna-send -n 1 -f luna://com.webos.appInstallService/dev/install \
   接続できるが、やはりイベントが来ない（ソケットは root:root 770 のため `chmod 777` が必要）。
 - 原因の推定: コンポジタが `wl_webos_shell` / `wl_shell` を公開しておらず（実測でグローバル一覧に無い）、
   アプリ用のシェルロールを持たないサーフェスにはリモコン入力をルーティングしない。
-- 対策: **SDL2 ベースのプレゼンタ**（`app/csrc/presenter_sdl.c`）を実装済み。`presenter.txt` に `sdl` を書くと SDL 経路で起動する。Moonlight（SDL）はリモコン入力が動作しており、
+- 対策: **SDL2 プレゼンタ**（`app/csrc/presenter_sdl.c`）を実装し、既定の描画経路にした。SDL 経由ではリモコンの上下・OK・戻るが届く（実測: `key code=103/108/28`）。
+  `presenter.txt` に `egl` を書くと従来の EGL 経路に戻る。
+- SDL の描画は `SDL_RenderSetLogicalSize` でキャンバス全体を出力に合わせる（サーフェスサイズ差による欠けを防ぐ）Moonlight（SDL）はリモコン入力が動作しており、
   arm sysroot には SDL2 のヘッダと `libSDL2.so` が揃っている（32bit ネイティブのまま移行可能）。

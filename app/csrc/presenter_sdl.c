@@ -14,6 +14,9 @@ static SDL_Renderer *g_ren = NULL;
 static SDL_Texture *g_tex = NULL;
 static int g_tex_w = 0, g_tex_h = 0;
 static int g_w = 0, g_h = 0;
+static void (*g_log)(const char *) = NULL;
+void sdl_presenter_set_log(void (*fn)(const char *)) { g_log = fn; }
+static void plog(const char *m) { if (g_log) g_log(m); }
 
 int sdl_presenter_init(int w, int h)
 {
@@ -21,12 +24,19 @@ int sdl_presenter_init(int w, int h)
     fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
     return -1;
   }
-  fprintf(stderr, "SDL video driver: %s\n", SDL_GetCurrentVideoDriver());
+  { char m[96]; snprintf(m, sizeof(m), "SDL driver %s", SDL_GetCurrentVideoDriver()); plog(m); }
 
-  g_w = w;
-  g_h = h;
+  SDL_DisplayMode dm;
+  int dw = w, dh = h;
+  if (SDL_GetDesktopDisplayMode(0, &dm) == 0) {
+    { char m[96]; snprintf(m, sizeof(m), "desktop mode %dx%d", dm.w, dm.h); plog(m); }
+    dw = dm.w;
+    dh = dm.h;
+  }
+  g_w = dw;
+  g_h = dh;
   g_win = SDL_CreateWindow("OMT Monitor", SDL_WINDOWPOS_CENTERED,
-                           SDL_WINDOWPOS_CENTERED, w, h,
+                           SDL_WINDOWPOS_CENTERED, dw, dh,
                            SDL_WINDOW_FULLSCREEN_DESKTOP);
   if (!g_win) {
     fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError());
@@ -36,6 +46,12 @@ int sdl_presenter_init(int w, int h)
   if (!g_ren) {
     fprintf(stderr, "SDL_CreateRenderer: %s\n", SDL_GetError());
     return -3;
+  }
+  {
+    int ww = 0, wh = 0, ow = 0, oh = 0;
+    SDL_GetWindowSize(g_win, &ww, &wh);
+    SDL_GetRendererOutputSize(g_ren, &ow, &oh);
+    { char m[128]; snprintf(m, sizeof(m), "window %dx%d output %dx%d", ww, wh, ow, oh); plog(m); }
   }
   return 0;
 }
@@ -66,6 +82,9 @@ int sdl_presenter_frame(const void *bgra, int w, int h)
       return -2;
     g_tex_w = w;
     g_tex_h = h;
+    /* Map texture pixels onto the whole output so a mismatched surface size
+       (compositor vs renderer) cannot crop the frame. */
+    SDL_RenderSetLogicalSize(g_ren, w, h);
   }
 
   if (SDL_UpdateTexture(g_tex, NULL, bgra, w * 4) != 0)

@@ -67,6 +67,7 @@ unsafe extern "C" {
     fn presenter_pointer_y() -> i32;
     fn input_set_logger(cb: extern "C" fn(*const core::ffi::c_char));
     fn sdl_presenter_init(w: i32, h: i32) -> i32;
+    fn sdl_presenter_set_log(cb: extern "C" fn(*const core::ffi::c_char));
     fn sdl_presenter_frame(pixels: *const u8, w: i32, h: i32) -> i32;
     fn sdl_presenter_poll_key(code: *mut i32) -> i32;
     fn sdl_presenter_size(w: *mut i32, h: *mut i32);
@@ -230,18 +231,20 @@ fn draw_picker(shared: &Shared, font: &Option<font::Font>, canvas: &mut [u8], ui
         return;
     };
 
-    // Proportional layout so the picker looks right at 1280x720 and 1920x1080.
-    let title_scale = (ui_h / 180).max(1);
+    // Layout derived from the real font metrics so it adapts to any PSF size.
+    let fh = f.height.max(8);
+    let title_scale = (ui_h / (fh * 6)).max(1);
     let title_y = ui_h / 27;
-    let sub_y = title_y + 16 * title_scale + 12;
-    let list_top = (ui_h * 22) / 100;
-    let row_h = (ui_h / 15).max(40);
+    let sub_scale = (title_scale / 2).max(1);
+    let sub_y = title_y + fh * title_scale + ui_h / 90;
+    let list_top = sub_y + fh * sub_scale + ui_h / 20;
+    let row_h = fh * sub_scale + ui_h / 60;
 
     c.text(f, 60, title_y, title_scale, "OMT MONITOR", (255, 210, 120));
-    c.text(f, 60, sub_y, (title_scale / 3).max(1), "SELECT A SOURCE ON THE LAN", (170, 170, 170));
+    c.text(f, 60, sub_y, sub_scale, "SELECT A SOURCE ON THE LAN", (170, 170, 170));
 
     if sources.is_empty() {
-        c.text(f, 60, list_top, (title_scale / 2).max(1), "SEARCHING FOR OMT SOURCES...", (200, 200, 200));
+        c.text(f, 60, list_top, sub_scale, "SEARCHING FOR OMT SOURCES...", (200, 200, 200));
     }
 
     for (i, s) in sources.iter().take(8).enumerate() {
@@ -254,9 +257,9 @@ fn draw_picker(shared: &Shared, font: &Option<font::Font>, canvas: &mut [u8], ui
         } else {
             format!("  {}", s.name.to_uppercase())
         };
-        c.text(f, 60, y, (title_scale / 2).max(1), &label, (240, 240, 240));
+        c.text(f, 60, y, sub_scale, &label, (240, 240, 240));
         let addr = s.addrs.first().cloned().unwrap_or_default();
-        c.text(f, (ui_w * 60) / 100, y, (title_scale / 4).max(1), &addr, (160, 200, 160));
+        c.text(f, (ui_w * 60) / 100, y, 1, &addr, (160, 200, 160));
     }
 
     let hint_y = ui_h - (ui_h / 15);
@@ -395,11 +398,12 @@ fn main() {
             .ok()
             .and_then(|e| e.parent().map(|d| d.join("presenter.txt")))
             .and_then(|p| std::fs::read_to_string(p).ok())
-            .map(|t| t.trim() == "sdl")
-            .unwrap_or(false);
+            .map(|t| t.trim() != "egl")
+            .unwrap_or(true); // SDL is the default presenter (remote input works)
 
         let mut use_sdl = false;
         if want_sdl {
+            unsafe { sdl_presenter_set_log(c_log) };
             let rc = unsafe { sdl_presenter_init(UI_W as i32, UI_H as i32) };
             if rc == 0 {
                 use_sdl = true;
@@ -453,7 +457,7 @@ fn main() {
         };
 
         let font = font::Font::load();
-        info!("font loaded: {}", font.is_some());
+        info!("font loaded: {} {:?}", font.is_some(), font.as_ref().map(|f| (f.width, f.height)));
         let (mut ui_w, mut ui_h) = (UI_W, UI_H);
         if use_sdl {
             let (mut w32, mut h32) = (0i32, 0i32);
