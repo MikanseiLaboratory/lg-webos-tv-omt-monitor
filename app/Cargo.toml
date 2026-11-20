@@ -12,12 +12,15 @@ sdl2 = []
 
 [dependencies]
 flate2 = "1"
-openmediatransport = { path = "../deps/openmediatransport-rs" }
-vmx = { version = "0.2", features = ["arm32-neon"] }
+# TODO: switch to the published crates once both are on crates.io:
+#   openmediatransport = "0.2.2"
+#   vmx = { version = "0.2.2", features = ["arm32-neon"] }
+openmediatransport = { git = "https://github.com/MikanseiLaboratory/openmediatransport-rs", tag = "v0.2.2" }
+vmx = { version = "0.2.2", features = ["arm32-neon"] }
 
 
 [patch.crates-io]
-vmx = { git = "https://github.com/MikanseiLaboratory/vmx-rs", branch = "feat/armv7-neon" }
+vmx = { git = "https://github.com/MikanseiLaboratory/vmx-rs", tag = "v0.2.2" }
 
 [profile.release]
 lto = false

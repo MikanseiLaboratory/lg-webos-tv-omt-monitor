@@ -75,3 +75,15 @@ python3 packaging/build-ipk.py --bin target/aarch64-unknown-linux-gnu/release/om
 - `luna://com.webos.appInstallService/dev/install` で IPK を投入する（root があれば devmode_enabled で通る）。
 - 起動: `luna://com.webos.applicationManager/launch {"id":"org.mikansei.omt-monitor"}`
 - ログはアプリのディレクトリの `run.log`（アプリは jail 内で /tmp が private のため）。
+
+## 依存クレート
+
+`openmediatransport` と `vmx` は v0.2.2 のタグを参照する。crates.io に公開後は
+`app/Cargo.toml` のコメントに従って通常のバージョン指定に切り替える。
+
+公開順序（`vmx` が先）:
+
+```sh
+cd vmx-rs && cargo publish
+cd openmediatransport-rs && cargo publish
+```
