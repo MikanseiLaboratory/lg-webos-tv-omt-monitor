@@ -47,6 +47,7 @@ unsafe extern "C" {
     fn presenter_roundtrip() -> i32;
     fn presenter_shutdown();
     fn presenter_set_log(cb: extern "C" fn(*const core::ffi::c_char));
+    fn wakelock_start() -> i32;
 }
 
 extern "C" fn c_log(msg: *const core::ffi::c_char) {
@@ -208,6 +209,11 @@ fn main() {
             unsafe { env::set_var(k, v) };
         }
     }
+
+    std::thread::spawn(|| {
+        let rc = unsafe { wakelock_start() };
+        info!("wakelock exited: {rc}");
+    });
 
     let shared = Arc::new(Shared::new());
 
