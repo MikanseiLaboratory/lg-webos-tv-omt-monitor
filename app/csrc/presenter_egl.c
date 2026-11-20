@@ -61,6 +61,11 @@ static void registry_global(void *data, struct wl_registry *registry, uint32_t n
                             const char *interface, uint32_t version) {
   (void)data;
   (void)version;
+  {
+    char m[160];
+    snprintf(m, sizeof(m), "global %s v%u", interface, version);
+    plog(m);
+  }
   if (strcmp(interface, "wl_compositor") == 0) {
     g.compositor = wl_registry_bind(registry, name, &wl_compositor_interface, 1);
   } else if (strcmp(interface, "wl_shell") == 0) {
@@ -87,13 +92,21 @@ static void create_surface(int w, int h) {
   const char *display_id = getenv("DISPLAY_ID");
   if (!display_id || !*display_id) display_id = "0";
 
+  {
+    char m[160];
+    snprintf(m, sizeof(m), "globals compositor=%p shell=%p webos_shell=%p",
+             (void *)g.compositor, (void *)g.shell, (void *)g.webos_shell);
+    plog(m);
+  }
   g.surface = wl_compositor_create_surface(g.compositor);
+  plog(g.surface ? "wl_surface created" : "wl_compositor_create_surface returned NULL");
 
   if (g.shell) {
     g.shell_surface = wl_shell_get_shell_surface(g.shell, g.surface);
     wl_shell_surface_set_toplevel(g.shell_surface);
   }
 
+  plog("wl_shell done");
   if (g.webos_shell) {
     g.webos_surface = wl_webos_shell_get_shell_surface(g.webos_shell, g.surface);
     wl_webos_shell_surface_set_property(g.webos_surface, "appId", app_id);
@@ -101,7 +114,8 @@ static void create_surface(int w, int h) {
     wl_webos_shell_surface_set_property(g.webos_surface, "displayAffinity", display_id);
   }
 
-  g.egl_window = wl_egl_window_create(g.surface, w, h);
+  plog("webos_shell done");
+  plog("surface ready");
 }
 
 static GLuint compile(GLenum type, const char *src) {
@@ -173,6 +187,9 @@ int presenter_init(int w, int h) {
   memset(&g, 0, sizeof(g));
   g.width = w;
   g.height = h;
+  plog("init a");
+  plog("init b");
+  plog("init c");
 
   if (!getenv("XDG_RUNTIME_DIR")) setenv("XDG_RUNTIME_DIR", "/tmp/xdg", 0);
   if (!getenv("EGL_PLATFORM")) setenv("EGL_PLATFORM", "wayland", 0);
@@ -230,6 +247,11 @@ int presenter_init(int w, int h) {
   if (g.egl_display == EGL_NO_DISPLAY) return -3;
   if (!eglInitialize(g.egl_display, NULL, NULL)) { plog("eglInitialize failed"); return -4; }
   plog("egl initialized");
+
+  plog("creating egl window");
+  g.egl_window = wl_egl_window_create(g.surface, w, h);
+  if (!g.egl_window) { plog("wl_egl_window_create returned NULL"); return -4; }
+  plog("egl window created");
 
   EGLint cfg[] = {EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
                   EGL_SURFACE_TYPE,    EGL_WINDOW_BIT,

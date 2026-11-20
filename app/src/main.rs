@@ -248,13 +248,19 @@ fn main() {
         ("EGL_PLATFORM", "wayland"),
         ("WAYLAND_DISPLAY", "wayland-0"),
         ("XKB_CONFIG_ROOT", "/usr/share/X11/xkb"),
-        (
-            "GLES_PROXY_BIN",
-            "/media/developer/apps/usr/palm/applications/org.webosbrew.bridge-64to32/service/gles_proxy",
-        ),
     ] {
         if env::var_os(k).is_none() {
             unsafe { env::set_var(k, v) };
+        }
+    }
+
+    if let Ok(exe) = env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let proxy = dir.join("gles_proxy");
+            if proxy.exists() && env::var_os("GLES_PROXY_BIN").is_none() {
+                unsafe { env::set_var("GLES_PROXY_BIN", &proxy) };
+                info!("GLES_PROXY_BIN = {}", proxy.display());
+            }
         }
     }
 

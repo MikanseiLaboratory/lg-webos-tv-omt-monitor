@@ -69,6 +69,7 @@ def main():
     ap.add_argument("--bin", required=True)
     ap.add_argument("--out", default=os.path.join(HERE, f"{APP_ID}.ipk"))
     ap.add_argument("--lib-so", default=None, help="extra shared library to bundle as lib/<name>")
+    ap.add_argument("--gles-proxy", default=None, help="gles_proxy binary from the 64to32 bridge")
     args = ap.parse_args()
 
     binary = open(args.bin, "rb").read()
@@ -81,6 +82,9 @@ def main():
         (f"{base}/icon.png", icon, 0o644),
         (f"{base}/omt-monitor", binary, 0o755),
     ]
+    if args.gles_proxy:
+        data_entries.append((f"{base}/gles_proxy", open(args.gles_proxy, "rb").read(), 0o755))
+
     if args.lib_so:
         lib_name = os.path.basename(args.lib_so)
         # SONAME form so the loader finds it under $ORIGIN/lib

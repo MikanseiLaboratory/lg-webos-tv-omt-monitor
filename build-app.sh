@@ -23,6 +23,8 @@ clang --target=aarch64-linux-gnu --sysroot="$SYS" -O2 -fPIC \
   -c "$APP/csrc/presenter_egl.c" -o "$HERE/build/presenter_egl.o"
 
 echo "== building Rust app"
+# Cargo does not track the C object passed via link-arg, so force a relink.
+touch "$APP/src/main.rs"
 RUSTFLAGS="\
  -C linker=rust-lld -C link-arg=--disable-new-dtags \
  -C link-arg=$SYS/usr/lib/crt1.o -C link-arg=$SYS/usr/lib/crti.o -C link-arg=$SYS/usr/lib/crtn.o \
@@ -41,4 +43,5 @@ echo "== packaging"
 python3 "$HERE/packaging/build-ipk.py" \
   --bin "$APP/target/aarch64-unknown-linux-gnu/release/omt-monitor" \
   --lib-so "$SYS/usr/lib/libwayland-webos-client.so.1.0.0" \
+  --gles-proxy "$BRIDGE_LIB/../service/gles_proxy" \
   --out "$HERE/build/omt-monitor.ipk"
