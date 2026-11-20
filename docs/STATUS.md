@@ -65,3 +65,25 @@ luna-send -n 1 -f luna://com.webos.appInstallService/dev/install \
 - 1080p60 は不可（上記）。720p60 か 1080p30 を推奨
 - 音声は未実装（映像のみ）
 - 入力（リモコン）処理は未実装。終了はアプリ切替で
+
+## ソース選択 UI と入力の現状（2026-11-20 追記）
+
+### 実装したもの
+- 起動時に DNS-SD で OMT ソースを列挙し、**TV 上に一覧を描画**（PSF コンソールフォントを
+  `/usr/share/consolefonts/Agafari-16.psfu.gz` から読み込み、BGRA キャンバスに描いて提示）
+- 選択中の行をハイライト表示、アドレスも併記
+- 選択方法（現状）:
+  1. `source.txt` があれば固定 URL を再生（ヘッドレス）
+  2. 起動パラメータ `params.index` で一覧の n 番目を再生
+     `luna-send -n 1 -f luna://com.webos.applicationManager/launch '{"id":"org.mikansei.omt-monitor","params":{"index":1}}'`
+  3. 何も指定が無ければ **4 秒後に一覧の先頭を自動再生**
+
+### リモコン入力が届かない件（実測）
+- `wl_seat` / `wl_keyboard` はバインドでき、`kbd enter (focus)` も受信するが、
+  **キーイベントが 1 件も来ない**
+- `/tmp/netinput.pointer.sock`（`luna://com.webos.service.networkinput/getPointerInputSocket` で取得）は
+  接続できるが、やはりイベントが来ない（ソケットは root:root 770 のため `chmod 777` が必要）
+- 原因の推定: コンポジタが `wl_webos_shell` / `wl_shell` を公開しておらず（実測でグローバル一覧に無い）、
+  アプリ用のシェルロールを持たないサーフェスにはリモコン入力をルーティングしない
+- 対策案: **SDL2 ベースのプレゼンタに差し替える**。Moonlight（SDL）はリモコン入力が動いており、
+  arm sysroot には SDL2 のヘッダと `libSDL2.so` が揃っている（32bit ネイティブのまま移行可能）

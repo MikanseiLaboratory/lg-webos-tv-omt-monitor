@@ -13,6 +13,7 @@
 #include <string.h>
 
 static LSHandle *g_handle = NULL;
+LSHandle *wakelock_handle(void) { return g_handle; }
 static GMainLoop *g_loop = NULL;
 
 static gboolean wakelock_tick(gpointer data)

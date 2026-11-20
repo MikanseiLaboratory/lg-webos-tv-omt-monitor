@@ -11,6 +11,7 @@ default = ["sdl2"]
 sdl2 = []
 
 [dependencies]
+flate2 = "1"
 openmediatransport = { git = "https://github.com/MikanseiLaboratory/openmediatransport-rs" }
 vmx = { version = "0.2", features = ["arm32-neon"] }
 

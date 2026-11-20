@@ -14,6 +14,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <poll.h>
 
 #include <wayland-client.h>
 #include <wayland-egl.h>
@@ -54,8 +55,99 @@ struct state {
 static struct state g;
 
 static void (*g_log)(const char *) = NULL;
+static void (*g_key)(int code, int pressed) = NULL;
+void presenter_set_key_handler(void (*fn)(int, int)) { g_key = fn; }
+
+static struct wl_seat *g_seat = NULL;
+static struct wl_keyboard *g_kbd = NULL;
+static struct wl_pointer *g_ptr = NULL;
+static int g_ptr_x = 0, g_ptr_y = 0;
 static void plog(const char *m) { if (g_log) g_log(m); }
 void presenter_set_log(void (*fn)(const char *)) { g_log = fn; }
+
+static void kbd_keymap(void *d, struct wl_keyboard *k, uint32_t fmt, int32_t fd,
+                       uint32_t size) {
+  (void)d; (void)k; (void)fmt; (void)size;
+  if (fd >= 0) close(fd);
+}
+static void kbd_enter(void *d, struct wl_keyboard *k, uint32_t serial,
+                      struct wl_surface *s, struct wl_array *keys) {
+  (void)d; (void)k; (void)serial; (void)s; (void)keys;
+  plog("kbd enter (focus)");
+}
+static void kbd_leave(void *d, struct wl_keyboard *k, uint32_t serial,
+                      struct wl_surface *s) {
+  (void)d; (void)k; (void)serial; (void)s;
+  plog("kbd leave");
+}
+static void kbd_key(void *d, struct wl_keyboard *k, uint32_t serial,
+                    uint32_t time, uint32_t key, uint32_t state) {
+  (void)d; (void)k; (void)serial; (void)time;
+  if (g_key) g_key((int)key, state == WL_KEYBOARD_KEY_STATE_PRESSED);
+}
+static void kbd_modifiers(void *d, struct wl_keyboard *k, uint32_t serial,
+                          uint32_t dep, uint32_t lat, uint32_t lock,
+                          uint32_t grp) {
+  (void)d; (void)k; (void)serial; (void)dep; (void)lat; (void)lock; (void)grp;
+}
+static void kbd_repeat(void *d, struct wl_keyboard *k, int32_t rate,
+                       int32_t delay) {
+  (void)d; (void)k; (void)rate; (void)delay;
+}
+static const struct wl_keyboard_listener kbd_listener = {
+    .keymap = kbd_keymap, .enter = kbd_enter, .leave = kbd_leave,
+    .key = kbd_key, .modifiers = kbd_modifiers, .repeat_info = kbd_repeat,
+};
+
+static void ptr_enter(void *d, struct wl_pointer *p, uint32_t serial,
+                      struct wl_surface *s, wl_fixed_t x, wl_fixed_t y) {
+  (void)d; (void)p; (void)serial; (void)s;
+  g_ptr_x = wl_fixed_to_int(x);
+  g_ptr_y = wl_fixed_to_int(y);
+}
+static void ptr_leave(void *d, struct wl_pointer *p, uint32_t serial,
+                      struct wl_surface *s) {
+  (void)d; (void)p; (void)serial; (void)s;
+}
+static void ptr_motion(void *d, struct wl_pointer *p, uint32_t time,
+                       wl_fixed_t x, wl_fixed_t y) {
+  (void)d; (void)p; (void)time;
+  g_ptr_x = wl_fixed_to_int(x);
+  g_ptr_y = wl_fixed_to_int(y);
+}
+static void ptr_button(void *d, struct wl_pointer *p, uint32_t serial,
+                       uint32_t time, uint32_t button, uint32_t state) {
+  (void)d; (void)p; (void)serial; (void)time;
+  if (g_key) g_key((int)button, state == WL_POINTER_BUTTON_STATE_PRESSED);
+}
+static void ptr_axis(void *d, struct wl_pointer *p, uint32_t time,
+                     uint32_t axis, wl_fixed_t value) {
+  (void)d; (void)p; (void)time; (void)axis; (void)value;
+}
+static const struct wl_pointer_listener ptr_listener = {
+    .enter = ptr_enter, .leave = ptr_leave, .motion = ptr_motion,
+    .button = ptr_button, .axis = ptr_axis,
+};
+
+static void seat_capabilities(void *d, struct wl_seat *seat, uint32_t caps) {
+  (void)d;
+  if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !g_kbd) {
+    g_kbd = wl_seat_get_keyboard(seat);
+    wl_keyboard_add_listener(g_kbd, &kbd_listener, NULL);
+    plog("keyboard bound");
+  }
+  if ((caps & WL_SEAT_CAPABILITY_POINTER) && !g_ptr) {
+    g_ptr = wl_seat_get_pointer(seat);
+    wl_pointer_add_listener(g_ptr, &ptr_listener, NULL);
+    plog("pointer bound");
+  }
+}
+static void seat_name(void *d, struct wl_seat *seat, const char *name) {
+  (void)d; (void)seat; (void)name;
+}
+static const struct wl_seat_listener seat_listener = {
+    .capabilities = seat_capabilities, .name = seat_name,
+};
 
 static void registry_global(void *data, struct wl_registry *registry, uint32_t name,
                             const char *interface, uint32_t version) {
@@ -70,6 +162,9 @@ static void registry_global(void *data, struct wl_registry *registry, uint32_t n
     g.compositor = wl_registry_bind(registry, name, &wl_compositor_interface, 1);
   } else if (strcmp(interface, "wl_shell") == 0) {
     g.shell = wl_registry_bind(registry, name, &wl_shell_interface, 1);
+  } else if (strcmp(interface, "wl_seat") == 0) {
+    g_seat = wl_registry_bind(registry, name, &wl_seat_interface, 1);
+    wl_seat_add_listener(g_seat, &seat_listener, NULL);
   } else if (strcmp(interface, "wl_webos_shell") == 0) {
     g.webos_shell = wl_registry_bind(registry, name, &wl_webos_shell_interface, 1);
   }
@@ -182,6 +277,8 @@ static int init_gl(void) {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   return 0;
 }
+
+int presenter_pointer_y(void) { return g_ptr_y; }
 
 int presenter_init(int w, int h) {
   memset(&g, 0, sizeof(g));
@@ -318,7 +415,24 @@ int presenter_frame(const void *bgra, int w, int h) {
 
 int presenter_roundtrip(void) {
   if (!g.display) return -1;
-  return wl_display_dispatch_pending(g.display);
+  struct pollfd pfd;
+  pfd.fd = wl_display_get_fd(g.display);
+  pfd.events = POLLIN;
+  pfd.revents = 0;
+
+  if (wl_display_prepare_read(g.display) != 0) {
+    wl_display_dispatch_pending(g.display);
+    wl_display_flush(g.display);
+    return 0;
+  }
+  if (poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN)) {
+    wl_display_read_events(g.display);
+  } else {
+    wl_display_cancel_read(g.display);
+  }
+  wl_display_dispatch_pending(g.display);
+  wl_display_flush(g.display);
+  return 0;
 }
 
 void presenter_shutdown(void) {

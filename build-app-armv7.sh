@@ -19,6 +19,9 @@ clang --target=armv7-linux-gnueabi --sysroot="$SYS" -O2 -fPIC \
 clang --target=armv7-linux-gnueabi --sysroot="$SYS" -O2 -fPIC \
   $(pkg-config --cflags glib-2.0 2>/dev/null || echo "-I$SYS/usr/include/glib-2.0 -I$SYS/usr/lib/glib-2.0/include") \
   -c "$APP/csrc/wakelock.c" -o "$HERE/build/wakelock.o"
+clang --target=armv7-linux-gnueabi --sysroot="$SYS" -O2 -fPIC \
+  -I"$SYS/usr/include/glib-2.0" -I"$SYS/usr/lib/glib-2.0/include" \
+  -c "$APP/csrc/input.c" -o "$HERE/build/input.o"
 
 echo "== building Rust app (armv7)"
 export RUSTC_WRAPPER="$HERE/build/rustc-vmx-neon.py"
@@ -29,7 +32,7 @@ RUSTFLAGS="\
  -C relocation-model=static -C linker=rust-lld -C link-arg=-no-pie \
  -C link-arg=$SYS/usr/lib/crt1.o -C link-arg=$SYS/usr/lib/crti.o -C link-arg=$SYS/usr/lib/crtn.o \
  -C link-arg=$HERE/build/getauxval_stub.o \
- -C link-arg=$HERE/build/presenter_egl_arm.o -C link-arg=$HERE/build/wakelock.o \
+ -C link-arg=$HERE/build/presenter_egl_arm.o -C link-arg=$HERE/build/wakelock.o -C link-arg=$HERE/build/input.o \
  -C link-arg=-L$HERE/build/nolibgcc \
  -C link-arg=--sysroot=$SYS \
  -C link-arg=-L$SYS/usr/lib -C link-arg=-L$SYS/lib -C link-arg=-L$GCCL \
