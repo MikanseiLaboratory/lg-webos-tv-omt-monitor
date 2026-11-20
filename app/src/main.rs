@@ -66,7 +66,7 @@ unsafe extern "C" {
     fn wakelock_start() -> i32;
     fn presenter_pointer_y() -> i32;
     fn input_set_logger(cb: extern "C" fn(*const core::ffi::c_char));
-    fn sdl_presenter_init(w: i32, h: i32) -> i32;
+    fn sdl_presenter_init(w: i32, h: i32, want_gl: i32) -> i32;
     fn sdl_presenter_set_log(cb: extern "C" fn(*const core::ffi::c_char));
     fn sdl_presenter_frame(pixels: *const u8, w: i32, h: i32) -> i32;
     fn sdl_presenter_poll_key(code: *mut i32) -> i32;
@@ -475,17 +475,20 @@ fn main() {
             presenter_set_log(c_log);
             presenter_set_key_handler(c_key);
         }
-        let want_sdl = std::env::current_exe()
+        // presenter.txt: "egl" | "sdl" (SDL renderer) | "gl" (SDL window + GLES3 PBO)
+        let mode = std::env::current_exe()
             .ok()
             .and_then(|e| e.parent().map(|d| d.join("presenter.txt")))
             .and_then(|p| std::fs::read_to_string(p).ok())
-            .map(|t| t.trim() != "egl")
-            .unwrap_or(true); // SDL is the default presenter (remote input works)
+            .map(|t| t.trim().to_string())
+            .unwrap_or_else(|| "sdl".to_string());
+        let want_sdl = mode != "egl";
+        let want_gl = mode == "gl";
 
         let mut use_sdl = false;
         if want_sdl {
             unsafe { sdl_presenter_set_log(c_log) };
-            let rc = unsafe { sdl_presenter_init(UI_W as i32, UI_H as i32) };
+            let rc = unsafe { sdl_presenter_init(UI_W as i32, UI_H as i32, want_gl as i32) };
             if rc == 0 {
                 use_sdl = true;
                 info!("SDL presenter ready");

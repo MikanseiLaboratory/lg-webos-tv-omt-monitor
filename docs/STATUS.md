@@ -106,3 +106,21 @@ luna-send -n 1 -f luna://com.webos.appInstallService/dev/install \
 
 送信機と TV は **有線 LAN** で接続することを推奨する。Wi-Fi でも動作するが、ジッタにより
 音声の途切れや映像フレームの欠落が発生する。有線接続で大半は解消する。
+
+## 最適化の試行（2026-11-20 追記2）
+
+### 1. GLES3 + PBO による非同期アップロード
+- `presenter.txt` に `gl` を書くと SDL ウィンドウ + GLES3 コンテキスト + ダブル PBO 経路で描画する
+- 実機の GL は `OpenGL ES 3.2 build 24.1@6525005`
+- 実測（720p）: `up=5.0〜5.3ms` / `draw=1.1〜1.5ms`（SDL レンダラ経路は `up=5.3〜5.6ms`）
+- **改善なし**。ボトルネックは API ではなく、CPU→GPU のコピー帯域（約 700MB/s）そのもの
+
+### 2. NDL（Native Display Layer）での直接表示
+- NDL のヘッダ（`libndl-media/NDL_directmedia*.h`）を確認
+- `NDL_DirectVideoPlay(void *buffer, unsigned int size)` は **圧縮ビットストリーム**（H.264/H.265/VP9/AV1）を渡す API
+- VMX1 の生フレームを渡す経路は無く、**この最適化は不可**
+
+### 結論
+720p では present 6.3ms のうち 5.3ms がアップロードだが、decode 17ms が支配的なため
+全体への影響は限定的。抜本的に削るには UYVY（2byte/px）で受けてシェーダ変換する必要があり、
+デコーダ側（crate）の UYVY 出力対応が前提になる。
