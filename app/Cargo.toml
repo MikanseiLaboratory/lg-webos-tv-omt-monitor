@@ -6,5 +6,10 @@ rust-version = "1.91"
 license = "MIT"
 description = "OMT (Open Media Transport) monitor for LG webOS TVs"
 
+[features]
+default = ["sdl2"]
+sdl2 = []
+
 [dependencies]
 openmediatransport = "0.1"
+

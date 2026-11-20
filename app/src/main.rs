@@ -3,6 +3,10 @@
 //! Receives an OMT video stream, decodes VMX1 in software and presents the BGRA
 //! frames either through the bridge's EGL/GLES2 path (default) or SDL2.
 
+#[cfg(feature = "sdl2")]
+mod sdl;
+#[cfg(not(feature = "sdl2"))]
+#[path = "sdl_stub.rs"]
 mod sdl;
 
 use std::env;

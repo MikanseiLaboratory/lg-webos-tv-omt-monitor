@@ -100,3 +100,27 @@ fps=42.4 decode=5.68ms present=16.42ms cpu=119%
 ### 残る課題
 - **SAM から起動した場合のみ** `wl_display_connect` 直前でプロセスが消える（root シェルからは同じバイナリが動作）。
   jail/seccomp かコンポジタ側の制約と思われる。要調査（次は bridge アプリと同じ起動条件を突き合わせる）。
+
+## 32bit ネイティブ経路（2026-11-20 続き3）— これが本線
+
+bridge を使わず、**TV 自身の 32bit EGL/GLESv2 + wayland** で描画する経路に切替。SAM 起動でも動作する。
+
+### ビルド要点（`build-app-armv7.sh`）
+- target: `armv7-unknown-linux-gnueabi`（soft-float）
+- `-C relocation-model=static -C link-arg=-no-pie`（sysroot の crt1.o が非PICのため）
+- crt1.o / crti.o / crtn.o を明示リンク（**これが無いと e_entry=0 で即死**）
+- `getauxval` が sysroot の古い glibc に無いので自前スタブ（/proc/self/auxv を読む）をリンク
+- SDL2 は使わない（`--no-default-features`、sdl_stub.rs にフォールバック）
+
+### 実測（1080p60 カラーバー、SAM 起動）
+```
+fps=18.8 decode=30.1ms present=12.9ms cpu=218%
+```
+- 表示は `LSM NL_VSC {"app_id":"org.mikansei.omt-monitor","visible":true}`
+- decode が scalar VMX1 のため 30ms → 19fps 頭打ち（present は vsync 待ちで 13〜16ms）
+
+### armv7 NEON の壁
+- `vmx` の `arm32-neon` feature は **LLVM の soft-float 制約**で `rustc-LLVM ERROR: Do not know how to soften this operator's operand!` になる
+- `lto = "thin"` を有効にすると vmx 自体はコンパイルできるが、最終バイナリの LTO で同じエラー
+- `+vfp3,+neon` のグローバル付与も不可（他クレートの float が壊れる）
+- 対策候補: (a) vmx を cdylib として別ビルドして C ABI で呼ぶ、(b) ホットループだけ C/asm で書く、(c) 64bit bridge 経路の proxy spawn を解決する
