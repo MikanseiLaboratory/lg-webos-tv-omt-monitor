@@ -100,7 +100,7 @@ Logs are written to `run.log` in the app directory.
 ## Source selection
 
 The picker is driven by the remote control (SDL2 presenter). A fixed source can also be selected
-without any input, through three mechanisms:
+without any input, in two ways:
 
 1. `source.txt` in the app directory pins a fixed URL, for example
    `omt://192.168.3.53:6400/Colorbars`. Playback starts without UI.
@@ -111,7 +111,7 @@ without any input, through three mechanisms:
      '{"id":"org.mikansei.omt-monitor","params":{"index":1}}'
    ```
 
-3. If neither is given, the first entry of the list auto-plays after 4 s.
+If neither is set, the picker stays on screen until the remote selects a source.
 
 ## Performance and constraints
 
@@ -159,7 +159,7 @@ from crates.io; nothing is vendored.
 
 ## Limitations
 
-- No audio. Video only.
+- Audio plays through SDL2. The playback buffer is capped at about 250 ms; frames past that are dropped, and a dry buffer plays silence. Wi-Fi jitter can still cause short dropouts.
 - Remote-control input works only in the SDL2 presenter.
 - 1080p is capped at about 30-31 fps; 1080p60 is impossible with software VMX1 decoding.
 - The app must be installed as an IPK and launched through `applicationManager` (SAM).

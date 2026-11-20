@@ -64,8 +64,8 @@ luna-send -n 1 -f luna://com.webos.appInstallService/dev/install \
 ## 既知の制限
 
 - 1080p60 は不可（上記）。720p60 か 1080p30 を推奨する。
-- 音声は未実装（映像のみ）。
-- 入力（リモコン）処理は未実装。終了はアプリ切替で行う。
+- 音声は SDL2 で再生する。バッファは約 250 ms までで、超えるフレームは破棄する。バッファが空になると無音になる。Wi-Fi ではジッタで短い途切れが残る。
+- リモコン入力は SDL2 プレゼンタ（既定）でのみ有効。`egl` 経路ではキーが来ない。アプリの終了はアプリ切替で行う。
 
 ## ソース選択 UI と入力の現状（2026-11-20 追記）
 
@@ -78,7 +78,7 @@ luna-send -n 1 -f luna://com.webos.appInstallService/dev/install \
   1. `source.txt` があれば固定 URL を再生する（ヘッドレス）。
   2. 起動パラメータ `params.index` で一覧の n 番目を再生する。
      `luna-send -n 1 -f luna://com.webos.applicationManager/launch '{"id":"org.mikansei.omt-monitor","params":{"index":1}}'`
-  3. 何も指定が無ければ **4 秒後に一覧の先頭を自動再生**する。
+  3. どちらも無ければ一覧を表示したまま、リモコンでソースを選ぶ。
 
 ### リモコン入力が届かない件（実測）
 
@@ -97,7 +97,7 @@ luna-send -n 1 -f luna://com.webos.appInstallService/dev/install \
 
 - OMT の FPA1（planar float32）を受信し、インターリーブして SDL2 オーディオで再生する
 - 受信ループのたびに `try_recv_audio` をすべて排出し、音声キューを詰まらせない
-- `AUDIO_Q` を 10 → 64 フレームに拡張した crate を `deps/openmediatransport-rs` に vendored 化
+- `AUDIO_Q` の 10 → 64 フレーム拡張は crates.io の `openmediatransport` 0.2.2 に含まれる
 - 再生バッファは最大 250 ms に制限（超過分は破棄）、SDL のコールバックバッファは 2048 サンプル
 - 実測: `adrop` は 25/s 程度 → 4/s 程度まで減少、`abuf` は 60〜220 ms で推移
 -  Wi-Fi 経由ではジッタで微小な途切れが残る（有線なら改善見込み）
