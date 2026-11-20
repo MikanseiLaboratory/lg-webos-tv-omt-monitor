@@ -1,0 +1,10 @@
+{
+  "id": "org.mikansei.omt-monitor",
+  "version": "0.1.0",
+  "vendor": "Mikansei Laboratory",
+  "type": "native",
+  "title": "OMT Monitor",
+  "main": "omt-monitor",
+  "icon": "icon.png",
+  "appDescription": "OMT (Open Media Transport) receiver/monitor for LG webOS TVs"
+}

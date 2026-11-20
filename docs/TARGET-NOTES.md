@@ -59,3 +59,20 @@
   `wrong ELF class: ELFCLASS32 ... ignored` が出る
 - 計測メモ: `load average` は常時 30 前後（`md_check_thread` 等のカーネルスレッドが D 状態で
   常駐するため）。CPU 使用率の指標には使わない
+
+## M0 追加実測（2026-11-20 続き）
+
+### 動いたこと
+- `aarch64-unknown-linux-gnu` の Rust バイナリが **bridge 経由で起動**（crt1.o を明示リンクするのが必須）
+- IPK の手組み（`packaging/build-ipk.py`）でインストール成功
+- OMT の **DNS-SD ディスカバリと TCP 接続**が実機で動作（`omt://LOCALHOST:6400/Colorbars` を検出）
+- armv7 の A32 NEON は vmx-rs の `arm32-neon` feature（nightly）で実機テスト 26/26 パス
+
+### 詰まっている点
+- アプリの SDL2 初期化（`SDL_Init`）で即クラッシュ。C で組んだ `external_test_64`（EGL/GLES 直叩き）は
+  動作するため、bridge の SDL2 を外部アプリから使う経路に問題がありそう。
+- ログ: `target:` の直後、`SDL video driver = wayland` を出した直後にプロセスが消える（SIGSEGV）。
+- 次の候補:
+  1. `external_test_64` と同じ **EGL/GLES2 + wayland 直叩き**に置き換える（実績あり）
+  2. bridge 同梱の **SDL3 (0.4.16)** を使う
+  3. SDL2 の webOS ドライバが要求する env（`APPID`, `DISPLAY_ID`, `XDG_RUNTIME_DIR`）を確認
