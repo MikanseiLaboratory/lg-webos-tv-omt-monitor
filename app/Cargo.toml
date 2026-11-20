@@ -11,5 +11,13 @@ default = ["sdl2"]
 sdl2 = []
 
 [dependencies]
-openmediatransport = "0.1"
+openmediatransport = { git = "https://github.com/MikanseiLaboratory/openmediatransport-rs" }
+vmx = { version = "0.2", features = ["arm32-neon"] }
 
+
+[patch.crates-io]
+vmx = { git = "https://github.com/MikanseiLaboratory/vmx-rs", branch = "feat/armv7-neon" }
+
+[profile.release]
+lto = false
+codegen-units = 1

@@ -124,3 +124,31 @@ fps=18.8 decode=30.1ms present=12.9ms cpu=218%
 - `lto = "thin"` を有効にすると vmx 自体はコンパイルできるが、最終バイナリの LTO で同じエラー
 - `+vfp3,+neon` のグローバル付与も不可（他クレートの float が壊れる）
 - 対策候補: (a) vmx を cdylib として別ビルドして C ABI で呼ぶ、(b) ホットループだけ C/asm で書く、(c) 64bit bridge 経路の proxy spawn を解決する
+
+## NEON 有効化と 60fps の実測（ラウンド2）
+
+### NEON を armv7 で有効化する方法（確定）
+- `armv7-unknown-linux-gnueabi`（soft-float）で A32 NEON を codegen すると LLVM が
+  `Do not know how to soften this operator's operand!` または `InstrEmitter::EmitRegSequence` でクラッシュ
+- 解決: **vmx クレートだけ** `-C target-feature=-soft-float,+neon` でコンパイル（RUSTC_WRAPPER で付与）
+  - VMX1 は整数演算のみなので、クレート境界に float が現れず ABI 破壊なし
+  - `RUSTC_WRAPPER` の変更は cargo のフィンガープリントに載らないため、vmx の fingerprint を消して再ビルドする
+- アプリ起動ログで確認: `vmx caps: neon=true ssse3=false avx2=false`
+
+### 実測（TV 上、A55×4）
+| 解像度 | decode | present | fps |
+|---|---|---|---|
+| 1920x1080 | 29〜32 ms | 11〜12 ms | **31** |
+| 1280x720 | 17.5 ms | 4.8 ms | **55〜57** |
+
+vmx の公式ベンチ（`simd_report`, path=neon）を実機で実行した結果:
+```
+1920x1080 load_from+decode_bgra: 36.2 ms/frame (27.6 fps)
+1920x1080 load_from+decode_uyvy: 29.4 ms/frame (34.0 fps)
+```
+→ **1080p60 は SoC のソフトウェアデコード能力の上限を超える**（NEON を使っても 34fps が天井）。
+720p なら 60fps 相当（55〜57fps）で安定。
+
+### スレッド構成
+- 受信スレッド（OMT recv）と描画スレッド（EGL）を分離し、最新フレーム優先でドロップ
+- `eglSwapInterval(0)` で vsync 待ちを解除（present は 1080p で 11ms→アップロード律速）

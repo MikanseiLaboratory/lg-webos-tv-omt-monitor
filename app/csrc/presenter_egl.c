@@ -274,6 +274,10 @@ int presenter_init(int w, int h) {
   plog("egl surface created");
 
   if (!eglMakeCurrent(g.egl_display, g.egl_surface, g.egl_surface, g.egl_context)) return -8;
+  /* No vsync wait: the decode loop is the throughput limit and we always
+     present the newest frame. */
+  eglSwapInterval(g.egl_display, 0);
+  plog("swap interval 0");
   if (init_gl() != 0) return -9;
 
   glViewport(0, 0, w, h);

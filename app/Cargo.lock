@@ -137,6 +137,7 @@ name = "omt-monitor"
 version = "0.1.0"
 dependencies = [
  "openmediatransport",
+ "vmx",
 ]
 
 [[package]]
@@ -147,9 +148,8 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "openmediatransport"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3618a06340de4747ed29bd51bbad326acb9a81e6724d742b25d04ee23677f2b2"
+version = "0.2.1"
+source = "git+https://github.com/MikanseiLaboratory/openmediatransport-rs#98172b65b4f2f802e338c39a4f8828b71dd60ddb"
 dependencies = [
  "bytes",
  "mdns-sd",
@@ -330,9 +330,8 @@ checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
 
 [[package]]
 name = "vmx"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05347c70521d66bb4ffb091d8875409a400ffb8f86f28240e1b044e8b0d84909"
+version = "0.2.1"
+source = "git+https://github.com/MikanseiLaboratory/vmx-rs?branch=feat%2Farmv7-neon#cc63e0e676153aad305fd113b0af0e6a904d433b"
 dependencies = [
  "rayon",
  "thiserror",
