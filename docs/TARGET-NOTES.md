@@ -42,3 +42,20 @@
   （`-C linker=rust-lld -C link-self-contained=yes` で外部リンカ不要）
 - 実機へは HTTP で配布 → `curl` → 実行（root telnet 経由）
 - **注意**: `vmx` は `rust-version = 1.97` のため 1.91 では `--ignore-rust-version` が必要
+
+## M0 実測（2026-11-20）
+
+- `webos-bridge-64to32` v0.0.8 を `luna://com.webos.appInstallService/dev/install` で導入成功
+  （root + `devmode_enabled` があれば HBC を介さず CLI から入れられる）
+- 起動すると `external_test_64`（appinfo の `main`）が `service/gles_proxy` を子プロセスとして
+  spawn する（fds 3–6 を渡す）。GLES 描画（回転キューブ）まで確認
+- 同梱 lib（64bit）: `libEGL.so.1` / `libGLESv2.so.2` / `libwayland-client` / `libwayland-egl` /
+  **`libSDL2-2.0.so.0.3000.12` (2.30.12-webos)** / **`libSDL3.so.0.4.16`** / alsa-lib / aarch64 glibc 一式
+- 外部 64bit アプリの要件:
+  1. `patchelf --set-interpreter <bridge>/lib/ld-linux-aarch64.so.1 <binary>`
+  2. `patchelf --add-rpath <bridge>/lib <binary>`
+  3. IPK 化は `ares-package -A arm` または `scripts/patch-aarch64-in-ipk.sh`
+- 既知の無害な警告: `/etc/ld.so.preload` の `/lib/libSegFault.so` が 32bit のため
+  `wrong ELF class: ELFCLASS32 ... ignored` が出る
+- 計測メモ: `load average` は常時 30 前後（`md_check_thread` 等のカーネルスレッドが D 状態で
+  常駐するため）。CPU 使用率の指標には使わない
