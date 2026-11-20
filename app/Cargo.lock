@@ -192,7 +192,8 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 [[package]]
 name = "openmediatransport"
 version = "0.2.2"
-source = "git+https://github.com/MikanseiLaboratory/openmediatransport-rs?tag=v0.2.2#f9d8c63108ca0c8d6781b5a440e07423cef6b66f"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "929a244f610dc6be5fe335e6ca99fdc290dd2d6bcae2fa72e44f85415735d7f9"
 dependencies = [
  "bytes",
  "mdns-sd",
@@ -380,7 +381,8 @@ checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
 [[package]]
 name = "vmx"
 version = "0.2.2"
-source = "git+https://github.com/MikanseiLaboratory/vmx-rs?tag=v0.2.2#fb964c3c4a97852fdcbba359c5a7ef40cd80b501"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e7aaf8f818ec95fcecbd1ea7c5c482eed01eea641bef9be427d287fad032750"
 dependencies = [
  "rayon",
  "thiserror",

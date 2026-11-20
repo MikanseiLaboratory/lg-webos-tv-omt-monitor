@@ -14,10 +14,6 @@ import sys
 argv = sys.argv[1:]
 if "--crate-name" in argv:
     i = argv.index("--crate-name")
-    if (
-        i + 1 < len(argv)
-        and argv[i + 1] == "vmx"
-        and any("vmx-rs-" in a for a in argv)
-    ):
+    if i + 1 < len(argv) and argv[i + 1] == "vmx":
         argv = argv + ["-C", "target-feature=-soft-float,+neon"]
 os.execv(argv[0], argv)

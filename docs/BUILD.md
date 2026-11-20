@@ -78,12 +78,8 @@ python3 packaging/build-ipk.py --bin target/aarch64-unknown-linux-gnu/release/om
 
 ## 依存クレート
 
-`openmediatransport` と `vmx` は v0.2.2 のタグを参照する。crates.io に公開後は
-`app/Cargo.toml` のコメントに従って通常のバージョン指定に切り替える。
+`openmediatransport` と `vmx` は crates.io の **0.2.2** を使用する（vendoring なし）。
 
-公開順序（`vmx` が先）:
-
-```sh
-cd vmx-rs && cargo publish
-cd openmediatransport-rs && cargo publish
-```
+公開は crates.io の Trusted Publishing（GitHub OIDC）で行う。`v*` タグを push すると
+`publish.yml` が走る。`Cargo.lock` が未コミットだと `cargo publish` が失敗するため、
+バージョン変更時は lock も同時にコミットする。

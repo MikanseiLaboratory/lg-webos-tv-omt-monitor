@@ -154,9 +154,8 @@ sample rate. Frames that would exceed the latency budget are dropped, so playbac
 stays close to live. The receive loop drains the audio queue on every iteration.
 
 `openmediatransport` 0.2.2 raised its decoded-audio queue (`AUDIO_Q`) from 10 to
-64 frames, which removed most of the receiver-side audio drops. No vendored copy
-is required: the app depends on the released crates (or their `v0.2.2` tags until
-they are on crates.io).
+64 frames, which removed most of the receiver-side audio drops. Both crates come
+from crates.io; nothing is vendored.
 
 ## Limitations
 
