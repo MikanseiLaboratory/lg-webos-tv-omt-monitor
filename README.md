@@ -153,9 +153,10 @@ buffered latency to 250 ms, and pushes it into an SDL2 device opened at the sour
 sample rate. Frames that would exceed the latency budget are dropped, so playback
 stays close to live. The receive loop drains the audio queue on every iteration.
 
-`openmediatransport` 0.2.2 raised its decoded-audio queue (`AUDIO_Q`) from 10 to
-64 frames, which removed most of the receiver-side audio drops. Both crates come
-from crates.io; nothing is vendored.
+`openmediatransport` 0.3.0 replaces its fixed 64-frame audio queue with a
+media-time budget (`ReceiverConfig::audio_max_latency`). This app asks for 250 ms,
+matching the SDL queue cap below, which still absorbs webOS decode stalls. Both
+crates come from crates.io; nothing is vendored.
 
 ## Limitations
 
