@@ -44,7 +44,7 @@ RUSTFLAGS="\
  -C link-arg=-lwayland-egl -C link-arg=-lwayland-webos-client \
  -C link-arg=-lluna-service2 -C link-arg=-lglib-2.0 -C link-arg=-lgobject-2.0 \
  -C link-arg=--dynamic-linker=/lib/ld-linux.so.3" \
-  cargo +nightly build --release --no-default-features \
+  cargo +nightly-2026-11-01 build --release --no-default-features \
     --target armv7-unknown-linux-gnueabi --manifest-path "$APP/Cargo.toml"
 
 echo "== packaging"

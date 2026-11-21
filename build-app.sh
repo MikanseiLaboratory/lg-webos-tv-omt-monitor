@@ -37,7 +37,7 @@ RUSTFLAGS="\
  -C link-arg=$HERE/build/presenter_egl.o \
  -C link-arg=--dynamic-linker=$BL_RUNTIME/ld-linux-aarch64.so.1 \
  -C link-arg=-rpath -C link-arg=\$ORIGIN/lib -C link-arg=-rpath -C link-arg=$BL_RUNTIME" \
-  cargo +nightly build --release --target aarch64-unknown-linux-gnu --manifest-path "$APP/Cargo.toml"
+  cargo +nightly-2026-11-01 build --release --target aarch64-unknown-linux-gnu --manifest-path "$APP/Cargo.toml"
 
 echo "== packaging"
 python3 "$HERE/packaging/build-ipk.py" \

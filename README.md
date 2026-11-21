@@ -62,8 +62,9 @@ bridge is not used.
 
 ## Build
 
-Requirements: the webOS arm buildroot sysroot (`arm-webos-linux-gnueabi`) and nightly Rust
-(the `vmx` crate needs Rust 1.97; nightly 1.102.0 is used).
+Requirements: the webOS arm buildroot sysroot (`arm-webos-linux-gnueabi`) and the pinned
+nightly in `rust-toolchain.toml` (the `vmx` crate needs Rust 1.97, and its AArch32 NEON
+kernels use unstable intrinsics).
 
 ```bash
 TC=/path/to/arm-webos-linux-gnueabi_sdk-buildroot ./build-app-armv7.sh

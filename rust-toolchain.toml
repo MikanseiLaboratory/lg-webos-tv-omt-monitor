@@ -1,4 +1,7 @@
-# The build needs nightly: openmediatransport/vmx require rustc 1.97, and the
-# armv7 NEON kernels need the unstable AArch32 intrinsics.
+# The build needs a nightly: openmediatransport/vmx require rustc 1.97, and the
+# armv7 NEON kernels use the unstable AArch32 intrinsics (rust-lang/rust#111800).
+# Pin the date instead of floating on `nightly`: those intrinsics are still
+# unstable and a future nightly may change or remove the feature gates.
+# Bump this intentionally together with build-app-armv7.sh.
 [toolchain]
-channel = "nightly"
+channel = "nightly-2026-11-01"
