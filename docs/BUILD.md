@@ -5,7 +5,7 @@
 
 ## 1. armv7 ネイティブ（現在の本線）
 
-必要なもの: webOS arm buildroot の sysroot（`arm-webos-linux-gnueabi`）と nightly Rust。
+必要なもの: webOS arm buildroot の sysroot（`arm-webos-linux-gnueabi`）と、`rust-toolchain.toml` で固定した nightly。
 
 ```bash
 TC=/path/to/arm-webos-linux-gnueabi_sdk-buildroot ./build-app-armv7.sh

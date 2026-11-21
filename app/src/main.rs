@@ -282,6 +282,9 @@ fn connect(url: &str, addresses: &[String]) -> Result<ReceiverSession, String> {
     let cfg = ReceiverConfig {
         frame_types: FrameType::VIDEO | FrameType::AUDIO,
         connect_timeout: Duration::from_secs(5),
+        // webOS decoders are slow enough to need more than the 100 ms default;
+        // the SDL queue is capped at the same value in pump_audio().
+        audio_max_latency: Duration::from_millis(250),
         ..ReceiverConfig::default()
     };
     ReceiverSession::connect_with_addresses(url, addresses, cfg)

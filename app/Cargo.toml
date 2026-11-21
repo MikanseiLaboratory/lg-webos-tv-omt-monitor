@@ -12,8 +12,8 @@ sdl2 = []
 
 [dependencies]
 flate2 = "1"
-openmediatransport = "0.2.2"
-vmx = { version = "0.2.2", features = ["arm32-neon"] }
+openmediatransport = "0.3.0"
+vmx = { version = "0.2.3", features = ["arm32-neon"] }
 
 [profile.release]
 lto = false
